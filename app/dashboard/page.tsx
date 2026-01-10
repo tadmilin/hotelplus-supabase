@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
   const fetchJobs = useCallback(async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) setLoading(true)
@@ -59,6 +60,7 @@ export default function DashboardPage() {
         router.push('/login')
         return
       }
+      setUserId(user.id)
       await fetchJobs()
     }
     checkAuth()
@@ -66,6 +68,8 @@ export default function DashboardPage() {
 
   // Real-time subscription
   useEffect(() => {
+    if (!userId) return
+
     const channel = supabase
       .channel('jobs-changes')
       .on(
@@ -74,6 +78,7 @@ export default function DashboardPage() {
           event: '*',
           schema: 'public',
           table: 'jobs',
+          filter: `user_id=eq.${userId}`,
         },
         (payload) => {
           console.log('Real-time update:', payload)
@@ -85,7 +90,7 @@ export default function DashboardPage() {
     return () => {
       channel.unsubscribe()
     }
-  }, [supabase, fetchJobs])
+  }, [supabase, fetchJobs, userId])
 
   // Auto-refresh every 5 seconds as fallback
   useEffect(() => {

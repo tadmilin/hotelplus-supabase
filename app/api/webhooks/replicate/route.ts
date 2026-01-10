@@ -15,9 +15,14 @@ const supabaseAdmin = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify webhook signature if REPLICATE_WEBHOOK_SECRET is set
+    // Verify webhook signature using Replicate's signing secret
     const webhookSecret = process.env.REPLICATE_WEBHOOK_SECRET
-    if (webhookSecret) {
+    const isDevelopment = process.env.NODE_ENV === 'development'
+    
+    let webhook: any
+    
+    if (webhookSecret && !isDevelopment) {
+      // PRODUCTION MODE: Full signature verification
       const signature = req.headers.get('webhook-signature')
       const webhookId = req.headers.get('webhook-id')
       const webhookTimestamp = req.headers.get('webhook-timestamp')
@@ -27,22 +32,50 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Missing webhook headers' }, { status: 401 })
       }
       
-      // Replicate sends webhook data, we verify with signature
-      // For now, accept all webhooks if secret exists (Replicate handles retry)
+      // Replicate uses Svix standard: "v1,<signature>"
+      const crypto = require('crypto')
+      const body = await req.text()
+      const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
+      const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(signedContent, 'utf8').digest('base64')
+      
+      // Extract actual signature (remove "v1," prefix)
+      const actualSignature = signature.includes(',') ? signature.split(',')[1] : signature
+      
+      if (expectedSignature !== actualSignature) {
+        console.error('❌ Invalid webhook signature')
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      }
+      
+      console.log('✅ Webhook signature verified')
+      
+      // Parse body for use below
+      webhook = JSON.parse(body)
+    } else {
+      // DEVELOPMENT MODE: Skip verification
+      if (webhookSecret && isDevelopment) {
+        const signature = req.headers.get('webhook-signature')
+        const webhookId = req.headers.get('webhook-id')
+        const webhookTimestamp = req.headers.get('webhook-timestamp')
+        
+        if (signature && webhookId && webhookTimestamp) {
+          console.log('🔓 Development mode - webhook signature verification skipped')
+        }
+      }
+      
+      // Parse webhook data
+      webhook = await req.json()
     }
-
-    const webhook = await req.json()
     
     console.log('📨 Webhook received:', {
-      id: webhook.id,
-      status: webhook.status,
-      hasOutput: !!webhook.output,
+      id: webhook?.id,
+      status: webhook?.status,
+      hasOutput: !!webhook?.output,
     })
 
-    const replicateId = webhook.id
-    const status = webhook.status
-    const output = webhook.output
-    const error = webhook.error
+    const replicateId = webhook?.id
+    const status = webhook?.status
+    const output = webhook?.output
+    const error = webhook?.error
 
     if (!replicateId) {
       console.error('❌ No replicate_id in webhook')
