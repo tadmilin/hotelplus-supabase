@@ -12,6 +12,10 @@ export async function POST(req: NextRequest) {
 
     const drive = getDriveClient()
 
+    if (!drive) {
+      return NextResponse.json({ error: 'Google Drive not configured' }, { status: 503 })
+    }
+
     // Download file from Drive
     const response = await drive.files.get(
       {

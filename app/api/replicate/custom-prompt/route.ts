@@ -17,7 +17,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Always use Nano Banana Pro for custom prompt
-    const model = 'fofr/nanobananapro'
+    // Model ID: google/nano-banana-pro
+    const model = 'google/nano-banana-pro'
     
     const input: any = {
       image: imageUrls[0],

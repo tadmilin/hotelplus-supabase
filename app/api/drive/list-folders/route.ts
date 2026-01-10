@@ -5,6 +5,11 @@ export async function GET(req: NextRequest) {
   try {
     const drive = getDriveClient()
     
+    // If drive is not configured, return empty list instead of crashing
+    if (!drive) {
+      return NextResponse.json({ drives: [] })
+    }
+    
     // List all shared drives
     const response = await drive.drives.list({
       pageSize: 100,

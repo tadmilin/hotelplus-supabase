@@ -11,6 +11,10 @@ export async function POST(req: NextRequest) {
 
     const drive = getDriveClient()
 
+    if (!drive) {
+       return NextResponse.json({ error: 'Google Drive not configured' }, { status: 503 })
+    }
+
     // List images in folder
     const response = await drive.files.list({
       q: `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`,
