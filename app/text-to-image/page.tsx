@@ -111,7 +111,7 @@ export default function TextToImagePage() {
             ✨ Text to Image
           </h1>
           <p className="text-gray-600">
-            เขียน Prompt เพื่อสร้างรูปด้วย AI (Flux Pro)
+            เขียน Prompt เพื่อสร้างรูปด้วย AI (Imagen 4 Ultra - Google)
           </p>
         </div>
 
@@ -159,7 +159,7 @@ export default function TextToImagePage() {
               <option value="9:16">9:16 Vertical (864×1536)</option>
             </select>
             <p className="text-xs text-gray-500 mt-2">
-              💡 Imagen 3 (Google) รองรับทุกขนาด • หลังสร้างเสร็จจะ Upscale x2 อัตโนมัติ
+              💡 Imagen 4 Ultra รองรับทุกขนาด • หลังสร้างเสร็จจะ Upscale x2 อัตโนมัติ
             </p>
           </div>
 
@@ -196,7 +196,7 @@ export default function TextToImagePage() {
               <li>• Prompt: {prompt.length > 0 ? `"${prompt.substring(0, 50)}..."` : '(ยังไม่ได้กรอก)'}</li>
               <li>• ขนาด: {outputSize}</li>
               <li>• จำนวน: {numImages} รูป</li>
-              <li>• Model: Imagen 3 (Google)</li>
+              <li>• Model: Imagen 4 Ultra (Google)</li>
               <li>• Upscale: x2 อัตโนมัติหลังสร้างเสร็จ</li>
               <li>• เวลาโดยประมาณ: {numImages * 15}-{numImages * 25} วินาที</li>
             </ul>
