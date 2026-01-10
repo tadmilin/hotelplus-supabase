@@ -7,7 +7,7 @@ const replicate = new Replicate({
 
 export async function POST(req: NextRequest) {
   try {
-    const { jobId, prompt, outputSize, numImages } = await req.json()
+    const { jobId, prompt, outputSize } = await req.json()
 
     if (!jobId || !prompt) {
       return NextResponse.json(
@@ -17,12 +17,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Use Imagen 4 Ultra (Google) for text-to-image
+    // Note: Create one prediction per job (no num_outputs - handled by frontend loop)
     const prediction = await replicate.predictions.create({
       model: 'google/imagen-4-ultra',
       input: {
         prompt: prompt,
         aspect_ratio: outputSize || '1:1',
-        num_outputs: numImages || 1,
       },
       webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
       webhook_events_filter: ['completed'],

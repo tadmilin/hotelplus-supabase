@@ -30,21 +30,41 @@ export async function POST(req: NextRequest) {
     const model = 'google/nano-banana-pro'
     
     let finalPrompt = prompt
-    const finalImageInput = templateUrl 
-      ? [templateUrl, ...imageUrls]  // Template first if provided
-      : imageUrls
-
-    // If template is provided, enforce strict structure preservation
+    
+    // If template is provided, use template + all images together
     if (templateUrl) {
       finalPrompt = `IMPORTANT: Keep the exact layout, frame, and structure from the first image unchanged. Only apply the following modifications within the designated areas: ${prompt}. Do not alter the template layout, borders, frames, or text overlays.`
+      
+      const input: any = {
+        image_input: [templateUrl, ...imageUrls],
+        prompt: finalPrompt,
+        aspect_ratio: outputSize || 'match_input_image',
+        output_format: 'png',
+        resolution: '1K',
+      }
+
+      const prediction = await replicate.predictions.create({
+        model: model,
+        input: input,
+        webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+        webhook_events_filter: ['completed'],
+      })
+
+      return NextResponse.json({
+        success: true,
+        id: prediction.id,
+        status: prediction.status,
+      })
     }
     
+    // NO TEMPLATE: Create separate prediction for EACH image
+    // Only use first image for this prediction (Frontend will handle creating multiple jobs)
     const input: any = {
-      image_input: finalImageInput,
-      prompt: finalPrompt,
+      image_input: [imageUrls[0]],  // Use only the first image
+      prompt: prompt,
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
-      resolution: '1K',  // Use 1K to ensure output can be upscaled (2K is too large for Real-ESRGAN)
+      resolution: '1K',
     }
 
     const prediction = await replicate.predictions.create({

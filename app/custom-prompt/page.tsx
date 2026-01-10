@@ -272,49 +272,90 @@ export default function CustomPromptPage() {
         }
       }
 
-      // Create job
-      const { data: job, error: jobError } = await supabase
-        .from('jobs')
-        .insert({
-          user_id: user.id,
-          user_name: user.user_metadata?.name || null,
-          user_email: user.email,
-          job_type: enableTemplate ? 'custom-prompt-template' : 'custom-prompt',
-          status: 'processing',
-          prompt: customPrompt,
-          output_size: outputSize,
-          image_urls: imageUrls,
-          output_urls: [],
+      // Create job(s) based on template usage
+      if (enableTemplate && finalTemplateUrl) {
+        // WITH TEMPLATE: Create single job with all images
+        const { data: job, error: jobError } = await supabase
+          .from('jobs')
+          .insert({
+            user_id: user.id,
+            user_name: user.user_metadata?.name || null,
+            user_email: user.email,
+            job_type: 'custom-prompt-template',
+            status: 'processing',
+            prompt: customPrompt,
+            output_size: outputSize,
+            image_urls: imageUrls,
+            output_urls: [],
+          })
+          .select()
+          .single()
+
+        if (jobError) throw jobError
+
+        const response = await fetch('/api/replicate/custom-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: job.id,
+            prompt: customPrompt,
+            imageUrls: imageUrls,
+            templateUrl: finalTemplateUrl,
+            outputSize: outputSize,
+          }),
         })
-        .select()
-        .single()
 
-      if (jobError) throw jobError
+        if (!response.ok) throw new Error('Failed to create job')
 
-      // Call Replicate API
-      const response = await fetch('/api/replicate/custom-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          prompt: customPrompt,
-          imageUrls: imageUrls,
-          templateUrl: finalTemplateUrl,
-          outputSize: outputSize,
-        }),
-      })
+        const result = await response.json()
+        await supabase
+          .from('jobs')
+          .update({ replicate_id: result.id })
+          .eq('id', job.id)
+      } else {
+        // NO TEMPLATE: Create separate job for EACH image
+        for (let i = 0; i < imageUrls.length; i++) {
+          setStatus(`🎨 กำลังสร้างงานที่ ${i + 1}/${imageUrls.length}...`)
+          
+          const { data: job, error: jobError } = await supabase
+            .from('jobs')
+            .insert({
+              user_id: user.id,
+              user_name: user.user_metadata?.name || null,
+              user_email: user.email,
+              job_type: 'custom-prompt',
+              status: 'processing',
+              prompt: customPrompt,
+              output_size: outputSize,
+              image_urls: [imageUrls[i]],  // Only this image
+              output_urls: [],
+            })
+            .select()
+            .single()
 
-      if (!response.ok) {
-        throw new Error('Failed to create job')
+          if (jobError) throw jobError
+
+          const response = await fetch('/api/replicate/custom-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: job.id,
+              prompt: customPrompt,
+              imageUrls: [imageUrls[i]],  // Send only one image
+              templateUrl: null,
+              outputSize: outputSize,
+            }),
+          })
+
+          if (!response.ok) throw new Error(`Failed to create job ${i + 1}`)
+
+          const result = await response.json()
+          await supabase
+            .from('jobs')
+            .update({ replicate_id: result.id })
+            .eq('id', job.id)
+        }
       }
-
-      const result = await response.json()
-
-      // Update job with replicate_id
-      await supabase
-        .from('jobs')
-        .update({ replicate_id: result.id })
-        .eq('id', job.id)
 
       router.push('/dashboard')
     } catch (error: any) {

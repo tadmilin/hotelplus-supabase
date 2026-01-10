@@ -37,49 +37,50 @@ export default function TextToImagePage() {
     setError('')
 
     try {
-      // Create job in Supabase
-      const { data: job, error: jobError } = await supabase
-        .from('jobs')
-        .insert({
-          user_id: user.id,
-          user_name: user.user_metadata?.name || null,
-          user_email: user.email,
-          job_type: 'text-to-image',
-          status: 'processing',
-          prompt: prompt,
-          output_size: outputSize,
-          image_urls: [],
-          output_urls: [],
+      // Create separate job for each image
+      for (let i = 0; i < numImages; i++) {
+        const { data: job, error: jobError } = await supabase
+          .from('jobs')
+          .insert({
+            user_id: user.id,
+            user_name: user.user_metadata?.name || null,
+            user_email: user.email,
+            job_type: 'text-to-image',
+            status: 'processing',
+            prompt: prompt,
+            output_size: outputSize,
+            image_urls: [],
+            output_urls: [],
+          })
+          .select()
+          .single()
+
+        if (jobError) throw jobError
+
+        // Call Replicate API for this job
+        const response = await fetch('/api/replicate/text-to-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: job.id,
+            prompt: prompt,
+            outputSize: outputSize,
+          }),
         })
-        .select()
-        .single()
 
-      if (jobError) throw jobError
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to create images')
+        }
 
-      // Call Replicate API
-      const response = await fetch('/api/replicate/text-to-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          prompt: prompt,
-          outputSize: outputSize,
-          numImages: numImages,
-        }),
-      })
+        const result = await response.json()
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create images')
+        // Update job with replicate_id
+        await supabase
+          .from('jobs')
+          .update({ replicate_id: result.id })
+          .eq('id', job.id)
       }
-
-      const result = await response.json()
-
-      // Update job with replicate_id
-      await supabase
-        .from('jobs')
-        .update({ replicate_id: result.id })
-        .eq('id', job.id)
 
       // Redirect to dashboard
       router.push('/dashboard')
