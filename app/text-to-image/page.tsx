@@ -10,7 +10,7 @@ export default function TextToImagePage() {
   
   const [user, setUser] = useState<any>(null)
   const [prompt, setPrompt] = useState('')
-  const [outputSize, setOutputSize] = useState('1:1-2K')
+  const [outputSize, setOutputSize] = useState('1:1')
   const [numImages, setNumImages] = useState(4)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')

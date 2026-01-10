@@ -23,7 +23,7 @@ export default function CustomPromptPage() {
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
   const [selectedImagesMap, setSelectedImagesMap] = useState<Map<string, DriveImage>>(new Map())
   const [customPrompt, setCustomPrompt] = useState('')
-  const [outputSize, setOutputSize] = useState('1:1-2K')
+  const [outputSize, setOutputSize] = useState('1:1')
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
