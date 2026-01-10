@@ -16,15 +16,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Use Imagen 3 (Google) for text-to-image
+    // Use Imagen 4 Ultra (Google) for text-to-image
     const prediction = await replicate.predictions.create({
-      model: 'google-deepmind/imagen-3',
+      model: 'google/imagen-4-ultra',
       input: {
         prompt: prompt,
         aspect_ratio: outputSize || '1:1',
         num_outputs: numImages || 1,
-        output_format: 'png',
-        output_quality: 100,
       },
       webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
       webhook_events_filter: ['completed'],
