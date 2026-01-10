@@ -1,11 +1,13 @@
--- เพิ่ม RLS Policy ให้ Admin สามารถเห็นงานของทุกคนได้
-CREATE POLICY "Admin can read all jobs"
+-- Policy 1: User ธรรมดาเห็นแค่งานของตัวเอง (ถ้ายังไม่มี)
+CREATE POLICY IF NOT EXISTS "Users can view own jobs"
+ON jobs FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Policy 2: Admin เห็นทุกงาน (รวมของตัวเอง)
+CREATE POLICY IF NOT EXISTS "Admin can read all jobs"
 ON jobs FOR SELECT
 USING (
-  auth.uid() IN (
-    SELECT id FROM auth.users 
-    WHERE raw_user_meta_data->>'is_admin' = 'true'
-  )
+  (auth.jwt()->>'user_metadata')::jsonb->>'is_admin' = 'true'
 );
 
 -- คำสั่งตั้ง User เป็น Admin (ให้ run ใน SQL Editor แยก)
