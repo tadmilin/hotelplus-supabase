@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import replicate from '@/lib/replicate'
 
 // Create Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
@@ -177,16 +178,27 @@ export async function POST(req: NextRequest) {
               .single()
 
             if (upscaleJob) {
-              // Call upscale API asynchronously (don't await)
-              fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/replicate/upscale`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  jobId: upscaleJob.id,
-                  imageUrl: outputUrl,
+              // Call Replicate API directly (more reliable than self-fetch)
+              console.log('🚀 Triggering Replicate Upscale for:', upscaleJob.id)
+              
+              const prediction = await replicate.predictions.create({
+                model: 'nightmareai/real-esrgan',
+                input: {
+                  image: outputUrl,
                   scale: 2,
-                }),
-              }).catch(err => console.error('Error triggering upscale:', err))
+                  face_enhance: false,
+                },
+                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                webhook_events_filter: ['completed'],
+              })
+
+              // Update job with replicate_id immediately
+              await supabaseAdmin
+                .from('jobs')
+                .update({ replicate_id: prediction.id })
+                .eq('id', upscaleJob.id)
+                
+              console.log('✅ Upscale started, ID:', prediction.id)
             }
           }
           
