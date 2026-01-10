@@ -9,6 +9,15 @@ export async function POST(req: NextRequest) {
   try {
     const { jobId, prompt, imageUrls, templateUrl, outputSize } = await req.json()
 
+    console.log('📥 Custom Prompt Request:', {
+      jobId,
+      hasPrompt: !!prompt,
+      imageCount: imageUrls?.length || 0,
+      hasTemplate: !!templateUrl,
+      templateUrl: templateUrl || 'none',
+      outputSize,
+    })
+
     if (!jobId || !prompt || !imageUrls || imageUrls.length === 0) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -20,19 +29,22 @@ export async function POST(req: NextRequest) {
     // Model ID: google/nano-banana-pro
     const model = 'google/nano-banana-pro'
     
+    let finalPrompt = prompt
+    const finalImageInput = templateUrl 
+      ? [templateUrl, ...imageUrls]  // Template first if provided
+      : imageUrls
+
+    // If template is provided, enhance prompt to use it as structure
+    if (templateUrl) {
+      finalPrompt = `Using the first image as the main structure/composition, ${prompt}`
+    }
+    
     const input: any = {
-      image_input: imageUrls,  // Correct parameter: array of image URLs for reference
-      prompt: prompt,
-      aspect_ratio: outputSize || '1:1',
+      image_input: finalImageInput,
+      prompt: finalPrompt,
+      aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
       resolution: '1K',  // Use 1K to ensure output can be upscaled (2K is too large for Real-ESRGAN)
-    }
-
-    // Add structure_image if template is provided (for controlled composition)
-    if (templateUrl) {
-      // Note: structure_image may not be a standard parameter for nano-banana-pro
-      // Consider adding templateUrl to image_input array instead
-      input.image_input = [templateUrl, ...imageUrls]
     }
 
     const prediction = await replicate.predictions.create({
