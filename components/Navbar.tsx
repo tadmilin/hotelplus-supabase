@@ -31,7 +31,7 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg">
+    <nav className="bg-gradient-to-r from-gray-900 to-black text-white shadow-lg">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-8">
@@ -45,8 +45,8 @@ export default function Navbar() {
                   href="/dashboard"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/dashboard' 
-                      ? 'bg-white text-purple-600 font-semibold' 
-                      : 'hover:bg-white/20'
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
                   }`}
                 >
                   📊 Dashboard
@@ -55,8 +55,8 @@ export default function Navbar() {
                   href="/text-to-image"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/text-to-image' 
-                      ? 'bg-white text-purple-600 font-semibold' 
-                      : 'hover:bg-white/20'
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
                   }`}
                 >
                   ✨ Text to Image
@@ -65,8 +65,8 @@ export default function Navbar() {
                   href="/custom-prompt"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/custom-prompt' 
-                      ? 'bg-white text-purple-600 font-semibold' 
-                      : 'hover:bg-white/20'
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
                   }`}
                 >
                   🎨 Custom Prompt
@@ -75,8 +75,8 @@ export default function Navbar() {
                   href="/upscale"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/upscale' 
-                      ? 'bg-white text-purple-600 font-semibold' 
-                      : 'hover:bg-white/20'
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
                   }`}
                 >
                   🔍 Upscale
@@ -85,8 +85,8 @@ export default function Navbar() {
                   href="/gemini-edit"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/gemini-edit' 
-                      ? 'bg-white text-purple-600 font-semibold' 
-                      : 'hover:bg-white/20'
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
                   }`}
                 >
                   💬 Gemini Edit
@@ -113,7 +113,7 @@ export default function Navbar() {
             ) : (
               <Link 
                 href="/login"
-                className="px-4 py-2 bg-white text-purple-600 hover:bg-gray-100 rounded-lg font-semibold transition-colors"
+                className="px-4 py-2 bg-white text-gray-900 hover:bg-gray-200 rounded-lg font-semibold transition-colors"
               >
                 🔑 Login
               </Link>

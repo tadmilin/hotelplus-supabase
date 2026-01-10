@@ -33,7 +33,17 @@ export async function POST(req: NextRequest) {
     
     // If template is provided, use template + all images together
     if (templateUrl) {
-      finalPrompt = `IMPORTANT: Keep the exact layout, frame, and structure from the first image unchanged. Only apply the following modifications within the designated areas: ${prompt}. Do not alter the template layout, borders, frames, or text overlays.`
+      finalPrompt = `[TEMPLATE MODE]
+รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ทั้งหมด (รวมข้อความ, กราฟิค, กรอบ)
+
+ขั้นตอน:
+1. ใช้ภาพที่สอง (รูปแรกหลัง Template) เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
+2. ถ้ามีรูปเพิ่ม: ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
+3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับข้อความ/กรอบ)
+4. ปรับแต่งภาพตามคำสั่งนี้: ${prompt}
+
+สิ่งที่ห้ามแก้ไข: กรอบ, ข้อความ, โลโก้, ตำแหน่ง Layout
+สิ่งที่สามารถแก้ได้: ภาพพื้นหลังและรูปเล็กทั้งหมด (ต้องเป็นภาพใหม่ที่แนบมา)`
       
       const input: any = {
         image_input: [templateUrl, ...imageUrls],
