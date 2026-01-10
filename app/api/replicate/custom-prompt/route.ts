@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       prompt: prompt,
       aspect_ratio: outputSize || '1:1',
       output_format: 'png',
-      resolution: '2K',
+      resolution: '1K',  // Use 1K to ensure output can be upscaled (2K is too large for Real-ESRGAN)
     }
 
     // Add structure_image if template is provided (for controlled composition)
