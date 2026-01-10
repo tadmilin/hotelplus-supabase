@@ -19,7 +19,16 @@ export default function Navbar() {
       setLoading(false)
     }
     getUser()
-  }, [])
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [supabase])
 
   async function handleLogout() {
     await supabase.auth.signOut()
