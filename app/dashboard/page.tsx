@@ -34,16 +34,25 @@ export default function DashboardPage() {
   const [showModal, setShowModal] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const fetchJobs = useCallback(async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) setLoading(true)
     
     try {
-      const { data, error } = await supabase
+      // ดึง jobs ตาม admin status
+      let query = supabase
         .from('jobs')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50)
+      
+      // ถ้าไม่ใช่ admin ดึงแค่งานของตัวเอง
+      if (!isAdmin && userId) {
+        query = query.eq('user_id', userId)
+      }
+
+      const { data, error } = await query
 
       if (error) throw error
       setJobs(data || [])
@@ -52,7 +61,7 @@ export default function DashboardPage() {
     } finally {
       if (showLoadingSpinner) setLoading(false)
     }
-  }, [supabase])
+  }, [supabase, isAdmin, userId])
 
   useEffect(() => {
     // Check auth
@@ -63,6 +72,16 @@ export default function DashboardPage() {
         return
       }
       setUserId(user.id)
+      
+      // เช็คว่าเป็น admin หรือไม่
+      const adminStatus = user.user_metadata?.is_admin === true || 
+                         user.user_metadata?.is_admin === 'true'
+      setIsAdmin(adminStatus)
+      
+      if (adminStatus) {
+        console.log('👑 Admin mode: viewing all jobs')
+      }
+      
       await fetchJobs()
     }
     checkAuth()
@@ -80,7 +99,8 @@ export default function DashboardPage() {
           event: '*',
           schema: 'public',
           table: 'jobs',
-          filter: `user_id=eq.${userId}`,
+          // Admin ฟังทุก job, User ธรรมดาฟังแค่ของตัวเอง
+          filter: isAdmin ? undefined : `user_id=eq.${userId}`,
         },
         (payload) => {
           console.log('Real-time update:', payload)
@@ -92,7 +112,7 @@ export default function DashboardPage() {
     return () => {
       channel.unsubscribe()
     }
-  }, [supabase, fetchJobs, userId])
+  }, [supabase, fetchJobs, userId, isAdmin])
 
   // Auto-refresh every 5 seconds as fallback
   useEffect(() => {
@@ -198,11 +218,18 @@ export default function DashboardPage() {
       <div className="container mx-auto px-4">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-purple-900 mb-2">
-            📊 Dashboard
-          </h1>
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-4xl font-bold text-purple-900">
+              📊 Dashboard
+            </h1>
+            {isAdmin && (
+              <span className="px-3 py-1 bg-yellow-100 border-2 border-yellow-400 text-yellow-800 rounded-full text-sm font-bold">
+                👑 ADMIN MODE
+              </span>
+            )}
+          </div>
           <p className="text-gray-600">
-            งานทั้งหมด {jobs.length} งาน • อัพเดทอัตโนมัติทุก 5 วินาที
+            {isAdmin ? 'งานของทุกคน' : 'งานของคุณ'} {jobs.length} งาน • อัพเดทอัตโนมัติทุก 5 วินาที
           </p>
         </div>
 
