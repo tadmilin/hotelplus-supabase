@@ -32,13 +32,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Missing webhook headers' }, { status: 401 })
       }
       
-      // Replicate uses Svix standard with hex encoding
+      // Replicate uses Svix standard. Secret starting with "whsec_" is base64 encoded.
       const crypto = require('crypto')
       const body = await req.text()
       const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
-      const expectedSignature = crypto.createHmac('sha256', webhookSecret)
+
+      // Handle Svix secret format (decode if whsec_ prefix exists)
+      const secretKey = webhookSecret.startsWith('whsec_') 
+        ? Buffer.from(webhookSecret.substring(6), 'base64')
+        : webhookSecret
+
+      const expectedSignature = crypto.createHmac('sha256', secretKey)
         .update(signedContent, 'utf8')
-        .digest('base64')  // ← ใช้ base64 ตามมาตรฐาน Replicate/Svix
+        .digest('base64')
       
       // Extract actual signature (remove "v1," prefix if exists)
       const actualSignature = signature.includes(',') ? signature.split(',')[1] : signature
