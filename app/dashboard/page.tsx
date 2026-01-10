@@ -20,6 +20,7 @@ interface Job {
   replicate_id: string | null
   created_at: string
   updated_at: string
+  progress?: number  // 0-100
 }
 
 export default function DashboardPage() {
@@ -277,13 +278,32 @@ export default function DashboardPage() {
                 <div className="p-4">
                   {/* Status Badge */}
                   <div className="mb-3">
-                    <span
-                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border-2 ${getStatusColor(
-                        job.status
-                      )}`}
-                    >
-                      {getStatusIcon(job.status)} {job.status.toUpperCase()}
-                    </span>
+                    {job.status === 'processing' ? (
+                      <div className="space-y-2">
+                        <span
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border-2 ${getStatusColor(
+                            job.status
+                          )}`}
+                        >
+                          {getStatusIcon(job.status)} PROCESSING
+                        </span>
+                        {/* Progress Bar */}
+                        <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                          <div 
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-1000 animate-pulse"
+                            style={{ width: '60%' }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border-2 ${getStatusColor(
+                          job.status
+                        )}`}
+                      >
+                        {getStatusIcon(job.status)} {job.status.toUpperCase()}
+                      </span>
+                    )}
                   </div>
 
                   {/* Mode/Type */}

@@ -236,9 +236,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true })
 
     } else if (status === 'processing' || status === 'starting') {
+      // Calculate estimated progress based on elapsed time
+      const createdAt = new Date(job.created_at).getTime()
+      const now = Date.now()
+      const elapsed = (now - createdAt) / 1000 // seconds
+      
+      // Estimate: most jobs take 20-60 seconds
+      // starting: 0-10%, processing: 10-90%
+      let progress = 0
+      if (status === 'starting') {
+        progress = Math.min(10, (elapsed / 60) * 100)
+      } else {
+        progress = Math.min(90, 10 + (elapsed / 40) * 80)
+      }
+      progress = Math.round(progress)
+      
       console.log('⏳ Job still processing:', {
         jobId: job.id,
         status: status,
+        progress: `${progress}%`,
+        elapsed: `${elapsed.toFixed(1)}s`,
       })
 
       // Update status only

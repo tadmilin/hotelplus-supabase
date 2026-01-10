@@ -81,6 +81,16 @@ export default function Navbar() {
                 >
                   🔍 Upscale
                 </Link>
+                <Link 
+                  href="/gemini-edit"
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    pathname === '/gemini-edit' 
+                      ? 'bg-white text-purple-600 font-semibold' 
+                      : 'hover:bg-white/20'
+                  }`}
+                >
+                  💬 Gemini Edit
+                </Link>
               </div>
             )}
           </div>
