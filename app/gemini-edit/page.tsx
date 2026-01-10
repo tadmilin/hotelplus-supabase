@@ -36,6 +36,45 @@ function GeminiEditContent() {
     });
   }, []);
 
+  // Function สำหรับ compress รูปลง max 1024px (แก้ปัญหา 413 error)
+  const compressImage = (base64: string, maxSize: number = 1024): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // ถ้ารูปเล็กกว่า maxSize ไม่ต้อง compress
+        if (width <= maxSize && height <= maxSize) {
+          resolve(base64);
+          return;
+        }
+
+        // คำนวณขนาดใหม่ (เก็บ aspect ratio)
+        if (width > height) {
+          if (width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      img.src = base64;
+    });
+  };
+
   // โหลดรูปจาก URL parameter (จาก Dashboard)
   useEffect(() => {
     const imageUrl = searchParams.get("imageUrl");
@@ -47,9 +86,11 @@ function GeminiEditContent() {
         .then((res) => res.blob())
         .then((blob) => {
           const reader = new FileReader();
-          reader.onloadend = () => {
+          reader.onloadend = async () => {
             const base64 = reader.result as string;
-            setSelectedImage(base64);
+            // Compress ก่อนเซ็ต (แก้ปัญหารูปใหญ่เกิน)
+            const compressed = await compressImage(base64, 1024);
+            setSelectedImage(compressed);
             setMessage("แก้ไขรูปนี้ให้สวยงามขึ้น"); // Default prompt
           };
           reader.readAsDataURL(blob);
@@ -70,8 +111,11 @@ function GeminiEditContent() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedImage(reader.result as string);
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      // Compress ก่อนเซ็ต (แก้ปัญหารูปใหญ่เกิน)
+      const compressed = await compressImage(base64, 1024);
+      setSelectedImage(compressed);
     };
     reader.readAsDataURL(file);
   };
