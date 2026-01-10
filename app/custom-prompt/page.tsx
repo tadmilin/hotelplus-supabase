@@ -236,6 +236,34 @@ export default function CustomPromptPage() {
         }
       }
 
+      // Upload template image if enabled
+      let finalTemplateUrl = null
+      if (enableTemplate && selectedTemplate) {
+        setStatus('กำลังอัพโหลด Template...')
+        
+        // Find template image object
+        const templateImage = templateImages.find(img => img.url === selectedTemplate)
+        
+        if (templateImage) {
+          // If from Drive, download and upload to Cloudinary
+          if (selectedTemplate.includes('drive.google.com')) {
+            const uploadRes = await fetch('/api/drive/download-and-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileId: templateImage.id, fileName: templateImage.name }),
+            })
+            
+            if (uploadRes.ok) {
+              const { url } = await uploadRes.json()
+              finalTemplateUrl = url
+            }
+          } else {
+            // Already uploaded to Cloudinary
+            finalTemplateUrl = selectedTemplate
+          }
+        }
+      }
+
       // Create job
       const { data: job, error: jobError } = await supabase
         .from('jobs')
@@ -243,9 +271,9 @@ export default function CustomPromptPage() {
           user_id: user.id,
           user_name: user.user_metadata?.name || null,
           user_email: user.email,
+          job_type: enableTemplate ? 'custom-prompt-template' : 'custom-prompt',
           status: 'processing',
           prompt: customPrompt,
-          template_type: enableTemplate ? 'custom-prompt-template' : 'custom-prompt',
           output_size: outputSize,
           image_urls: imageUrls,
           output_urls: [],
@@ -263,7 +291,7 @@ export default function CustomPromptPage() {
           jobId: job.id,
           prompt: customPrompt,
           imageUrls: imageUrls,
-          templateUrl: enableTemplate ? selectedTemplate : null,
+          templateUrl: finalTemplateUrl,
           outputSize: outputSize,
         }),
       })

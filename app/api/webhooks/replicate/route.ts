@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
       console.log('✅ Job updated successfully')
 
       // Auto-upscale x2 for non-upscale jobs
-      if (job.template_type !== 'upscale' && outputUrls.length > 0) {
+      if (job.job_type !== 'upscale' && outputUrls.length > 0) {
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)
         
         try {
@@ -106,9 +106,9 @@ export async function POST(req: NextRequest) {
                 user_id: job.user_id,
                 user_name: job.user_name,
                 user_email: job.user_email,
+                job_type: 'upscale',
                 status: 'processing',
                 prompt: `Auto-upscale x2 from job ${job.id}`,
-                template_type: 'upscale',
                 output_size: 'x2',
                 image_urls: [outputUrl],
                 output_urls: [],
