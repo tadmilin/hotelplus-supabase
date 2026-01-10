@@ -13,7 +13,8 @@ ON admin_users FOR SELECT
 USING (true);
 
 -- Policy 1: User ธรรมดาเห็นแค่งานของตัวเอง
-CREATE POLICY IF NOT EXISTS "Users can view own jobs"
+DROP POLICY IF EXISTS "Users can view own jobs" ON jobs;
+CREATE POLICY "Users can view own jobs"
 ON jobs FOR SELECT
 USING (auth.uid() = user_id);
 
