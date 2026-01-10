@@ -93,6 +93,69 @@ export async function POST(req: NextRequest) {
       },
     ];
 
+    // Auto-upscale x2 สำหรับรูปที่ Gemini generate (เหมือนกับ Replicate webhook)
+    const performAutoUpscale = async () => {
+      if (generatedImageUrls.length > 0) {
+        console.log('🔍 Starting auto-upscale x2 for Gemini images:', generatedImageUrls.length);
+        
+        for (const imageUrl of generatedImageUrls) {
+          try {
+            console.log('📤 Creating upscale job for:', imageUrl);
+            
+            // สร้าง upscale job
+            const { data: upscaleJob, error: jobError } = await supabase
+              .from('jobs')
+              .insert({
+                user_id: user.id,
+                user_name: null,
+                user_email: user.email,
+                job_type: 'upscale',
+                status: 'processing',
+                prompt: `Auto-upscale x2 from Gemini Edit`,
+                output_size: 'x2',
+                image_urls: [imageUrl],
+                output_urls: [],
+              })
+              .select()
+              .single();
+
+            if (jobError) {
+              console.error('❌ Error creating job:', jobError);
+              continue;
+            }
+
+            if (upscaleJob) {
+              console.log('✅ Job created:', upscaleJob.id);
+              
+              // เรียก Replicate Upscale API
+              const prediction = await replicate.predictions.create({
+                model: 'nightmareai/real-esrgan',
+                input: {
+                  image: imageUrl,
+                  scale: 2,
+                  face_enhance: false,
+                },
+                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                webhook_events_filter: ['completed'],
+              });
+
+              // Update job with replicate_id
+              await supabase
+                .from('jobs')
+                .update({ replicate_id: prediction.id })
+                .eq('id', upscaleJob.id);
+                
+              console.log('✅ Upscale job created and triggered:', upscaleJob.id, 'prediction:', prediction.id);
+            }
+          } catch (err) {
+            console.error('❌ Error creating upscale job:', err);
+          }
+        }
+      } else {
+        console.log('ℹ️ No images to upscale');
+      }
+    };
+
     // บันทึกหรืออัพเดท conversation
     if (conversationId) {
       // อัพเดท conversation เดิม
@@ -112,55 +175,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Auto-upscale x2 สำหรับรูปที่ Gemini generate (เหมือนกับ Replicate webhook)
-      if (generatedImageUrls.length > 0) {
-        console.log('🔍 Starting auto-upscale x2 for Gemini images');
-        
-        for (const imageUrl of generatedImageUrls) {
-          try {
-            // สร้าง upscale job
-            const { data: upscaleJob } = await supabase
-              .from('jobs')
-              .insert({
-                user_id: user.id,
-                user_name: user.user_metadata?.name || null,
-                user_email: user.email,
-                job_type: 'upscale',
-                status: 'processing',
-                prompt: `Auto-upscale x2 from Gemini Edit`,
-                output_size: 'x2',
-                image_urls: [imageUrl],
-                output_urls: [],
-              })
-              .select()
-              .single();
-
-            if (upscaleJob) {
-              // เรียก Replicate Upscale API
-              const prediction = await replicate.predictions.create({
-                model: 'nightmareai/real-esrgan',
-                input: {
-                  image: imageUrl,
-                  scale: 2,
-                  face_enhance: false,
-                },
-                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
-                webhook_events_filter: ['completed'],
-              });
-
-              // Update job with replicate_id
-              await supabase
-                .from('jobs')
-                .update({ replicate_id: prediction.id })
-                .eq('id', upscaleJob.id);
-                
-              console.log('✅ Upscale job created:', upscaleJob.id);
-            }
-          } catch (err) {
-            console.error('❌ Error creating upscale job:', err);
-          }
-        }
-      }
+      // Trigger auto-upscale
+      await performAutoUpscale();
 
       return NextResponse.json({
         conversationId,
@@ -190,7 +206,8 @@ export async function POST(req: NextRequest) {
           { status: 500 }
         );
       }
-
+      // Trigger auto-upscale
+      await performAutoUpscale();
       return NextResponse.json({
         conversationId: conversation.id,
         response: response.text,
