@@ -11,6 +11,10 @@ export async function uploadToCloudinary(imageUrl: string, folder: string = 'hot
     const result = await cloudinary.uploader.upload(imageUrl, {
       folder,
       resource_type: 'image',
+      // Resize to max 1024px to fit in GPU memory (for Replicate)
+      transformation: [
+        { width: 1024, height: 1024, crop: "limit" }
+      ]
     })
     return result.secure_url
   } catch (error) {
@@ -24,6 +28,10 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
     const result = await cloudinary.uploader.upload(base64Data, {
       folder,
       resource_type: 'image',
+      // Resize to max 1024px to fit in GPU memory (for Replicate)
+      transformation: [
+        { width: 1024, height: 1024, crop: "limit" }
+      ]
     })
     return result.secure_url
   } catch (error) {
