@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createGeminiChat, sendMessage, ChatMessage } from "@/lib/gemini";
 import { uploadImage } from "@/lib/cloudinary";
+import replicate from "@/lib/replicate";
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,13 +38,17 @@ export async function POST(req: NextRequest) {
 
     // อัพโหลดรูปที่ได้ไปยัง Cloudinary (ถ้ามี)
     const generatedImageUrls: string[] = [];
+    const generatedImageBase64s: string[] = []; // เก็บ base64 สำหรับ history
+    
     if (response.images && response.images.length > 0) {
       for (const base64Image of response.images) {
+        generatedImageBase64s.push(base64Image); // เก็บ base64 ก่อน
+        
         try {
           // ใช้ uploadImage จาก lib/cloudinary.ts ที่มี config แล้ว
           const dataUrl = `data:image/png;base64,${base64Image}`;
           const cloudinaryUrl = await uploadImage(dataUrl, "gemini-generated");
-          generatedImageUrls.push(cloudinaryUrl);
+          generatedImageUrls.push(cloudinaryUrl); // URL สำหรับส่งกลับ frontend
         } catch (uploadError) {
           console.error("Error uploading to Cloudinary:", uploadError);
           // เก็บเป็น base64 ถ้า upload ไม่สำเร็จ (fallback)
@@ -77,11 +82,11 @@ export async function POST(req: NextRequest) {
         role: "model",
         parts: [
           { text: response.text },
-          // เพิ่มรูปที่ generate ได้ลงใน history
-          ...generatedImageUrls.map((url) => ({
+          // เพิ่มรูปที่ generate ได้ลงใน history (ใช้ base64 ไม่ใช่ URL!)
+          ...generatedImageBase64s.map((base64) => ({
             inlineData: {
               mimeType: "image/png",
-              data: url.startsWith("data:") ? url.split(",")[1] : url, // ถ้าเป็น URL ใช้ URL, ถ้าเป็น base64 ใช้ base64
+              data: base64, // base64 เท่านั้น ไม่ใช่ URL
             },
           })),
         ],
@@ -105,6 +110,56 @@ export async function POST(req: NextRequest) {
           { error: "Failed to update conversation" },
           { status: 500 }
         );
+      }
+
+      // Auto-upscale x2 สำหรับรูปที่ Gemini generate (เหมือนกับ Replicate webhook)
+      if (generatedImageUrls.length > 0) {
+        console.log('🔍 Starting auto-upscale x2 for Gemini images');
+        
+        for (const imageUrl of generatedImageUrls) {
+          try {
+            // สร้าง upscale job
+            const { data: upscaleJob } = await supabase
+              .from('jobs')
+              .insert({
+                user_id: user.id,
+                user_name: user.user_metadata?.name || null,
+                user_email: user.email,
+                job_type: 'upscale',
+                status: 'processing',
+                prompt: `Auto-upscale x2 from Gemini Edit`,
+                output_size: 'x2',
+                image_urls: [imageUrl],
+                output_urls: [],
+              })
+              .select()
+              .single();
+
+            if (upscaleJob) {
+              // เรียก Replicate Upscale API
+              const prediction = await replicate.predictions.create({
+                model: 'nightmareai/real-esrgan',
+                input: {
+                  image: imageUrl,
+                  scale: 2,
+                  face_enhance: false,
+                },
+                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                webhook_events_filter: ['completed'],
+              });
+
+              // Update job with replicate_id
+              await supabase
+                .from('jobs')
+                .update({ replicate_id: prediction.id })
+                .eq('id', upscaleJob.id);
+                
+              console.log('✅ Upscale job created:', upscaleJob.id);
+            }
+          } catch (err) {
+            console.error('❌ Error creating upscale job:', err);
+          }
+        }
       }
 
       return NextResponse.json({
