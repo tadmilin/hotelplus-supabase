@@ -23,6 +23,21 @@ export async function uploadToCloudinary(imageUrl: string, folder: string = 'hot
   }
 }
 
+// สำหรับ upscaled images - เก็บขนาดเต็ม
+export async function uploadToCloudinaryFullSize(imageUrl: string, folder: string = 'hotelplus') {
+  try {
+    const result = await cloudinary.uploader.upload(imageUrl, {
+      folder,
+      resource_type: 'image',
+      // ไม่มี transformation = เก็บขนาดเต็ม
+    })
+    return result.secure_url
+  } catch (error) {
+    console.error('Cloudinary upload error:', error)
+    throw error
+  }
+}
+
 export async function uploadBase64ToCloudinary(base64Data: string, folder: string = 'hotelplus') {
   try {
     const result = await cloudinary.uploader.upload(base64Data, {

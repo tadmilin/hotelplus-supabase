@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
-import { uploadToCloudinary } from '@/lib/cloudinary'
+import { uploadToCloudinary, uploadToCloudinaryFullSize } from '@/lib/cloudinary'
 
 // Create Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
@@ -142,7 +142,8 @@ export async function POST(req: NextRequest) {
       for (const tempUrl of outputUrls) {
         try {
           console.log('📤 Uploading to Cloudinary:', tempUrl.substring(0, 50) + '...')
-          const permanentUrl = await uploadToCloudinary(tempUrl, 'replicate-outputs')
+          // ใช้ full-size สำหรับทุก output จาก Replicate
+          const permanentUrl = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
           permanentUrls.push(permanentUrl)
           console.log('✅ Uploaded successfully')
         } catch (uploadError) {
