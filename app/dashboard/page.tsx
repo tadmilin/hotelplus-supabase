@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   const fetchJobs = useCallback(async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) setLoading(true)
@@ -134,6 +135,39 @@ export default function DashboardPage() {
   function handleViewImages(job: Job) {
     setSelectedJob(job)
     setShowModal(true)
+  }
+
+  async function handleDeleteJob(jobId: string) {
+    if (!confirm('คุณแน่ใจหรือไม่ที่จะลบงานนี้? การดำเนินการนี้ไม่สามารถย้อนกลับได้')) {
+      return
+    }
+
+    setDeleting(jobId)
+
+    try {
+      const { error } = await supabase
+        .from('jobs')
+        .delete()
+        .eq('id', jobId)
+
+      if (error) throw error
+
+      // Remove from local state
+      setJobs(jobs.filter(j => j.id !== jobId))
+      
+      // Close modal if this job is being viewed
+      if (selectedJob?.id === jobId) {
+        setShowModal(false)
+        setSelectedJob(null)
+      }
+
+      alert('✅ ลบงานสำเร็จ')
+    } catch (error) {
+      console.error('Error deleting job:', error)
+      alert('❌ ลบงานล้มเหลว')
+    } finally {
+      setDeleting(null)
+    }
   }
 
   if (loading) {
@@ -304,14 +338,23 @@ export default function DashboardPage() {
                   )}
 
                   {/* Actions */}
-                  {job.output_urls && job.output_urls.length > 0 && (
+                  <div className="space-y-2">
+                    {job.output_urls && job.output_urls.length > 0 && (
+                      <button
+                        onClick={() => handleViewImages(job)}
+                        className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition-colors"
+                      >
+                        👁️ ดูรูปทั้งหมด ({job.output_urls.length})
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleViewImages(job)}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition-colors"
+                      onClick={() => handleDeleteJob(job.id)}
+                      disabled={deleting === job.id}
+                      className="w-full bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      👁️ ดูรูปทั้งหมด ({job.output_urls.length})
+                      {deleting === job.id ? '⏳ กำลังลบ...' : '🗑️ ลบงาน'}
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
             ))}
