@@ -281,19 +281,25 @@ export default function DashboardPage() {
                 <div className="aspect-square bg-gray-100 relative">
                   {job.output_urls && job.output_urls.length > 0 ? (
                     <Image
-                      src={job.output_urls[0]}
+                      src={job.output_urls[0].includes('cloudinary.com') 
+                        ? job.output_urls[0].replace('/upload/', '/upload/f_auto,q_auto,w_400/') 
+                        : job.output_urls[0]}
                       alt="Output"
                       fill
                       className="object-cover"
+                      loading="lazy"
                       unoptimized
                     />
                   ) : job.image_urls && job.image_urls.length > 0 ? (
                     <div className="relative w-full h-full">
                       <Image
-                        src={job.image_urls[0]}
+                        src={job.image_urls[0].includes('cloudinary.com') 
+                          ? job.image_urls[0].replace('/upload/', '/upload/f_auto,q_auto,w_400/') 
+                          : job.image_urls[0]}
                         alt="Input"
                         fill
                         className="object-cover opacity-50"
+                        loading="lazy"
                         unoptimized
                       />
                       <div className="absolute inset-0 flex items-center justify-center">
