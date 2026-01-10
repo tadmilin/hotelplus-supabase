@@ -539,10 +539,13 @@ export default function DashboardPage() {
                       className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
                     >
                       <Image
-                        src={url}
+                        src={url.includes('cloudinary.com') 
+                          ? url.replace('/upload/', '/upload/f_auto,q_auto,w_800/') 
+                          : url}
                         alt={`Output ${index + 1}`}
                         fill
                         className="object-cover"
+                        loading="lazy"
                         unoptimized
                       />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
