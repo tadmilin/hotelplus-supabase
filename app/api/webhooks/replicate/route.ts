@@ -177,8 +177,8 @@ export async function POST(req: NextRequest) {
               .single()
 
             if (upscaleJob) {
-              // Call upscale API
-              await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/replicate/upscale`, {
+              // Call upscale API asynchronously (don't await)
+              fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/replicate/upscale`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
                   imageUrl: outputUrl,
                   scale: 2,
                 }),
-              })
+              }).catch(err => console.error('Error triggering upscale:', err))
             }
           }
           
