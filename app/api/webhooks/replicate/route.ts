@@ -32,22 +32,29 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Missing webhook headers' }, { status: 401 })
       }
       
-      // Temporarily disable signature verification for debugging
-      console.log('🔓 Production mode - signature verification DISABLED for debugging')
+      // Replicate uses Svix standard with hex encoding
+      const crypto = require('crypto')
+      const body = await req.text()
+      const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
+      const expectedSignature = crypto.createHmac('sha256', webhookSecret)
+        .update(signedContent, 'utf8')
+        .digest('hex')  // ← ใช้ hex แทน base64
       
-      // TODO: Re-enable after confirming webhooks work
-      // const crypto = require('crypto')
-      // const body = await req.text()
-      // const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
-      // const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(signedContent, 'utf8').digest('hex')
-      // const actualSignature = signature.includes(',') ? signature.split(',')[1] : signature
-      // if (expectedSignature !== actualSignature) {
-      //   console.error('❌ Invalid webhook signature')
-      //   return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-      // }
+      // Extract actual signature (remove "v1," prefix if exists)
+      const actualSignature = signature.includes(',') ? signature.split(',')[1] : signature
       
-      // Parse webhook data (since we skipped verification)
-      webhook = await req.json()
+      if (expectedSignature !== actualSignature) {
+        console.error('❌ Invalid webhook signature', {
+          expected: expectedSignature.substring(0, 20) + '...',
+          actual: actualSignature.substring(0, 20) + '...',
+        })
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      }
+      
+      console.log('✅ Webhook signature verified')
+      
+      // Parse body for use below
+      webhook = JSON.parse(body)
     } else {
       // DEVELOPMENT MODE: Skip verification
       if (webhookSecret && isDevelopment) {
