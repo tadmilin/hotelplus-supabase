@@ -10,6 +10,7 @@ interface Job {
   user_id: string
   user_name: string | null
   user_email: string | null
+  job_type: string | null
   status: string
   prompt: string | null
   template_type: string | null
@@ -310,11 +311,12 @@ export default function DashboardPage() {
                   <div className="mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs bg-gradient-to-r from-purple-100 to-pink-100 text-purple-800 px-3 py-1 rounded-full font-semibold border border-purple-200">
-                        {job.template_type === 'text-to-image' && '✨ Text to Image'}
-                        {job.template_type === 'custom-prompt' && '🎨 Custom Prompt'}
-                        {job.template_type === 'custom-prompt-template' && '🎨 Custom + Template'}
-                        {job.template_type === 'upscale' && '🔍 Upscale'}
-                        {!job.template_type && '📋 Unknown'}
+                        {job.job_type === 'text-to-image' && '✨ Text to Image'}
+                        {job.job_type === 'custom-prompt' && '🎨 Custom Prompt'}
+                        {job.job_type === 'custom-prompt-template' && '🎨 Custom + Template'}
+                        {job.job_type === 'custom-template' && '🖼️ Custom Template'}
+                        {job.job_type === 'upscale' && '🔍 Upscale'}
+                        {!job.job_type && '📋 Unknown'}
                       </span>
                       {job.output_size && (
                         <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full border border-blue-200">
