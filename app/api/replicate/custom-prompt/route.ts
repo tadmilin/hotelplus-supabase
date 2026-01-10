@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
       ? [templateUrl, ...imageUrls]  // Template first if provided
       : imageUrls
 
-    // If template is provided, enhance prompt to use it as structure
+    // If template is provided, enforce strict structure preservation
     if (templateUrl) {
-      finalPrompt = `Using the first image as the main structure/composition, ${prompt}`
+      finalPrompt = `IMPORTANT: Keep the exact layout, frame, and structure from the first image unchanged. Only apply the following modifications within the designated areas: ${prompt}. Do not alter the template layout, borders, frames, or text overlays.`
     }
     
     const input: any = {
