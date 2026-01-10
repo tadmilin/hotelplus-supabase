@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
       const expectedSignature = crypto.createHmac('sha256', webhookSecret)
         .update(signedContent, 'utf8')
-        .digest('hex')  // ← ใช้ hex แทน base64
+        .digest('base64')  // ← ใช้ base64 ตามมาตรฐาน Replicate/Svix
       
       // Extract actual signature (remove "v1," prefix if exists)
       const actualSignature = signature.includes(',') ? signature.split(',')[1] : signature
