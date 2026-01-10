@@ -144,6 +144,11 @@ export default function DashboardPage() {
     setShowModal(true)
   }
 
+  function handleEditWithGemini(imageUrl: string) {
+    // ส่งไปหน้า Gemini Edit พร้อม URL รูป
+    router.push(`/gemini-edit?imageUrl=${encodeURIComponent(imageUrl)}`)
+  }
+
   async function handleDeleteJob(jobId: string) {
     if (!confirm('คุณแน่ใจหรือไม่ที่จะลบงานนี้? การดำเนินการนี้ไม่สามารถย้อนกลับได้')) {
       return
@@ -367,12 +372,22 @@ export default function DashboardPage() {
                   {/* Actions */}
                   <div className="space-y-2">
                     {job.output_urls && job.output_urls.length > 0 && (
-                      <button
-                        onClick={() => handleViewImages(job)}
-                        className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition-colors"
-                      >
-                        👁️ ดูรูปทั้งหมด ({job.output_urls.length})
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleViewImages(job)}
+                          className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-semibold transition-colors"
+                        >
+                          👁️ ดูรูปทั้งหมด ({job.output_urls.length})
+                        </button>
+                        {job.status === 'completed' && (
+                          <button
+                            onClick={() => handleEditWithGemini(job.output_urls[0])}
+                            className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white py-2 rounded-lg font-semibold transition-all transform hover:scale-105"
+                          >
+                            ✨ แก้ไขด้วย Gemini
+                          </button>
+                        )}
+                      </>
                     )}
                     <button
                       onClick={() => handleDeleteJob(job.id)}

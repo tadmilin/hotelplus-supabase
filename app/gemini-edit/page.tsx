@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { User } from "@supabase/supabase-js";
 
@@ -16,12 +17,14 @@ interface ChatMessage {
 }
 
 export default function GeminiEditPage() {
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +35,31 @@ export default function GeminiEditPage() {
       setUser(user);
     });
   }, []);
+
+  // โหลดรูปจาก URL parameter (จาก Dashboard)
+  useEffect(() => {
+    const imageUrl = searchParams.get("imageUrl");
+    if (imageUrl && isInitialLoad) {
+      setIsInitialLoad(false);
+      
+      // แปลง URL เป็น base64 สำหรับส่งไป Gemini
+      fetch(imageUrl)
+        .then((res) => res.blob())
+        .then((blob) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result as string;
+            setSelectedImage(base64);
+            setMessage("แก้ไขรูปนี้ให้สวยงามขึ้น"); // Default prompt
+          };
+          reader.readAsDataURL(blob);
+        })
+        .catch((err) => {
+          console.error("Error loading image:", err);
+          alert("ไม่สามารถโหลดรูปได้ กรุณาลองใหม่อีกครั้ง");
+        });
+    }
+  }, [searchParams, isInitialLoad]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
