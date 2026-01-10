@@ -23,7 +23,7 @@ export default function CustomPromptPage() {
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
   const [selectedImagesMap, setSelectedImagesMap] = useState<Map<string, DriveImage>>(new Map())
   const [customPrompt, setCustomPrompt] = useState('')
-  const [outputSize, setOutputSize] = useState('1:1')
+  const [outputSize, setOutputSize] = useState('match_input_image')
   const [creating, setCreating] = useState(false)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
@@ -523,16 +523,17 @@ export default function CustomPromptPage() {
                   onChange={(e) => setOutputSize(e.target.value)}
                   className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 font-medium focus:ring-2 focus:ring-purple-500"
                 >
-                  <option value="1:1">1:1 Square (1024×1024)</option>
-                  <option value="2:3">2:3 Portrait (896×1344)</option>
-                  <option value="3:2">3:2 Landscape (1344×896)</option>
-                  <option value="3:4">3:4 Tall Portrait (768×1024)</option>
-                  <option value="4:3">4:3 Wide (1024×768)</option>
-                  <option value="9:16">9:16 Vertical (608×1088)</option>
-                  <option value="16:9">16:9 Wide (1088×608)</option>
+                  <option value="match_input_image">🎯 ตามรูปต้นฉบับ (แนะนำ)</option>
+                  <option value="1:1">1:1 Square</option>
+                  <option value="2:3">2:3 Portrait</option>
+                  <option value="3:2">3:2 Landscape</option>
+                  <option value="3:4">3:4 Tall Portrait</option>
+                  <option value="4:3">4:3 Wide</option>
+                  <option value="9:16">9:16 Vertical (Story)</option>
+                  <option value="16:9">16:9 Wide (Cinema)</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-2">
-                  💡 Nano Banana Pro รองรับทุกขนาด • Upscale x2 อัตโนมัติ
+                  💡 ขนาดสุดท้ายจะถูก Upscale เป็น x2 อัตโนมัติ (2K → 4K)
                 </p>
               </div>
             )}

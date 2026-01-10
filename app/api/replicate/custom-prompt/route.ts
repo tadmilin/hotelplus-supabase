@@ -21,17 +21,18 @@ export async function POST(req: NextRequest) {
     const model = 'google/nano-banana-pro'
     
     const input: any = {
-      image: imageUrls[0],
+      image_input: imageUrls,  // Correct parameter: array of image URLs for reference
       prompt: prompt,
       aspect_ratio: outputSize || '1:1',
       output_format: 'png',
-      output_quality: 100,
-      num_outputs: Math.min(imageUrls.length, 4),
+      resolution: '2K',
     }
 
-    // Add template if provided
+    // Add structure_image if template is provided (for controlled composition)
     if (templateUrl) {
-      input.structure_image = templateUrl
+      // Note: structure_image may not be a standard parameter for nano-banana-pro
+      // Consider adding templateUrl to image_input array instead
+      input.image_input = [templateUrl, ...imageUrls]
     }
 
     const prediction = await replicate.predictions.create({
