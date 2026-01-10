@@ -236,7 +236,7 @@ export default function GeminiEditPage() {
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="พิมพ์ข้อความ... (Enter เพื่อส่ง)"
-                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 disabled={isLoading}
               />
               <button

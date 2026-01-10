@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
+import { uploadToCloudinary } from '@/lib/cloudinary'
 
 // Create Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
@@ -136,12 +137,27 @@ export async function POST(req: NextRequest) {
         outputCount: outputUrls.length,
       })
 
+      // อัพโหลดรูปไป Cloudinary เพื่อเก็บถาวร (Replicate URLs หมดอายุ!)
+      const permanentUrls: string[] = []
+      for (const tempUrl of outputUrls) {
+        try {
+          console.log('📤 Uploading to Cloudinary:', tempUrl.substring(0, 50) + '...')
+          const permanentUrl = await uploadToCloudinary(tempUrl, 'replicate-outputs')
+          permanentUrls.push(permanentUrl)
+          console.log('✅ Uploaded successfully')
+        } catch (uploadError) {
+          console.error('❌ Cloudinary upload failed, using temp URL:', uploadError)
+          // Fallback: ใช้ URL เดิมถ้า upload ไม่สำเร็จ
+          permanentUrls.push(tempUrl)
+        }
+      }
+
       // Update job with output URLs
       const { error: updateError } = await supabaseAdmin
         .from('jobs')
         .update({
           status: 'completed',
-          output_urls: outputUrls,
+          output_urls: permanentUrls, // ใช้ Cloudinary URLs แทน
           error: null,
           updated_at: new Date().toISOString(),
         })

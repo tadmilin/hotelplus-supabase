@@ -40,4 +40,7 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
   }
 }
 
+// Alias สำหรับใช้งานง่าย
+export const uploadImage = uploadBase64ToCloudinary
+
 export default cloudinary
