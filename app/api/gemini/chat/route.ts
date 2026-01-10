@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createGeminiChat, sendMessage, ChatMessage } from "@/lib/gemini";
-import { uploadImage } from "@/lib/cloudinary";
+import { uploadImageFullSize } from "@/lib/cloudinary";
 import replicate from "@/lib/replicate";
 
 export async function POST(req: NextRequest) {
@@ -45,9 +45,9 @@ export async function POST(req: NextRequest) {
         generatedImageBase64s.push(base64Image); // เก็บ base64 ก่อน
         
         try {
-          // ใช้ uploadImage จาก lib/cloudinary.ts ที่มี config แล้ว
+          // ใช้ uploadImageFullSize เพื่อเก็บขนาดเต็มก่อนส่งไป upscale
           const dataUrl = `data:image/png;base64,${base64Image}`;
-          const cloudinaryUrl = await uploadImage(dataUrl, "gemini-generated");
+          const cloudinaryUrl = await uploadImageFullSize(dataUrl, "gemini-generated");
           generatedImageUrls.push(cloudinaryUrl); // URL สำหรับส่งกลับ frontend
         } catch (uploadError) {
           console.error("Error uploading to Cloudinary:", uploadError);

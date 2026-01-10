@@ -40,6 +40,21 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
   }
 }
 
+// สำหรับรูปที่ต้องการขนาดเต็ม (เช่น ก่อน upscale)
+export async function uploadImageFullSize(base64Data: string, folder: string = 'hotelplus') {
+  try {
+    const result = await cloudinary.uploader.upload(base64Data, {
+      folder,
+      resource_type: 'image',
+      // ไม่มี transformation = เก็บขนาดเต็ม
+    })
+    return result.secure_url
+  } catch (error) {
+    console.error('Cloudinary upload error:', error)
+    throw error
+  }
+}
+
 // Alias สำหรับใช้งานง่าย
 export const uploadImage = uploadBase64ToCloudinary
 
