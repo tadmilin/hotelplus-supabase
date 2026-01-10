@@ -105,32 +105,43 @@ export default function CustomPromptPage() {
       return
     }
 
-    const maxSize = 10 * 1024 * 1024
+    // Reduce max size to 4MB due to Vercel 4.5MB limit
+    const maxSize = 4 * 1024 * 1024
     const largeFiles = Array.from(files).filter(file => file.size > maxSize)
     
     if (largeFiles.length > 0) {
-      alert(`ไฟล์ต่อไปนี้ใหญ่เกินไป (เกิน 10MB): ${largeFiles.map(f => f.name).join(', ')}`)
+      alert(`ไฟล์ต่อไปนี้ใหญ่เกินไป (เกิน 4MB): ${largeFiles.map(f => f.name).join(', ')}`)
       return
     }
 
     setUploadingFiles(true)
-    setStatus(`📤 กำลังอัพโหลด ${files.length} ไฟล์...`)
+    const uploadedImages: DriveImage[] = []
 
     try {
-      const formData = new FormData()
-      Array.from(files).forEach(file => {
+      // Upload files one by one to avoid Vercel 4.5MB body size limit
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name}...`)
+
+        const formData = new FormData()
         formData.append('files', file)
-      })
 
-      const res = await fetch('/api/upload-images', {
-        method: 'POST',
-        body: formData,
-      })
+        const res = await fetch('/api/upload-images', {
+          method: 'POST',
+          body: formData,
+        })
 
-      if (res.ok) {
-        const data = await res.json()
-        const uploadedImages = data.images as DriveImage[]
-        
+        if (res.ok) {
+          const data = await res.json()
+          uploadedImages.push(...data.images)
+        } else {
+          const errorText = await res.text()
+          console.error(`Failed to upload ${file.name}:`, errorText)
+          alert(`ไม่สามารถอัพโหลด ${file.name} ได้`)
+        }
+      }
+
+      if (uploadedImages.length > 0) {
         setSelectedImagesMap(prev => {
           const newMap = new Map(prev)
           uploadedImages.forEach(img => {
@@ -141,9 +152,6 @@ export default function CustomPromptPage() {
 
         setStatus(`✅ อัพโหลดสำเร็จ ${uploadedImages.length} รูป`)
         setTimeout(() => setStatus(''), 3000)
-      } else {
-        alert('อัพโหลดล้มเหลว')
-        setStatus('')
       }
     } catch (error) {
       console.error('Upload error:', error)
