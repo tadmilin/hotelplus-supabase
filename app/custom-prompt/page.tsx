@@ -601,7 +601,11 @@ export default function CustomPromptPage() {
 
                           if (res.ok) {
                             const data = await res.json()
-                            setSelectedTemplate(data.images[0].url)
+                            const uploadedTemplate = data.images[0]
+                            // Add to templateImages state so it can be found later
+                            setTemplateImages(prev => [uploadedTemplate, ...prev])
+                            // Auto-select it
+                            setSelectedTemplate(uploadedTemplate.url)
                           }
                           setUploadingFiles(false)
                           e.target.value = ''
