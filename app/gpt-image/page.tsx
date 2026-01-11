@@ -221,6 +221,7 @@ export default function GptImagePage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {inputImages.map((file, index) => (
                   <div key={index} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={URL.createObjectURL(file)}
                       alt={`Preview ${index + 1}`}

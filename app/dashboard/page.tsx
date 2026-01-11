@@ -279,7 +279,7 @@ export default function DashboardPage() {
               >
                 {/* Thumbnail */}
                 <div className="aspect-square bg-gray-100 relative">
-                  {job.output_urls && job.output_urls.length > 0 ? (
+                  {job.output_urls && job.output_urls.length > 0 && job.output_urls[0] ? (
                     <Image
                       src={job.output_urls[0].includes('cloudinary.com') 
                         ? job.output_urls[0].replace('/upload/', '/upload/f_auto,q_auto,w_400/') 
@@ -290,7 +290,7 @@ export default function DashboardPage() {
                       loading="lazy"
                       unoptimized
                     />
-                  ) : job.image_urls && job.image_urls.length > 0 ? (
+                  ) : job.image_urls && job.image_urls.length > 0 && job.image_urls[0] ? (
                     <div className="relative w-full h-full">
                       <Image
                         src={job.image_urls[0].includes('cloudinary.com') 
@@ -535,34 +535,36 @@ export default function DashboardPage() {
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {selectedJob.output_urls?.map((url, index) => (
-                    <div
-                      key={index}
-                      className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
-                    >
-                      <Image
-                        src={url.includes('cloudinary.com') 
-                          ? url.replace('/upload/', '/upload/f_auto,q_auto,w_800/') 
-                          : url}
-                        alt={`Output ${index + 1}`}
-                        fill
-                        className="object-cover"
-                        loading="lazy"
-                        unoptimized
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
-                        onClick={(e) => e.stopPropagation()}
+                    url ? (
+                      <div
+                        key={index}
+                        className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
                       >
-                        🔗
-                      </a>
-                      <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                        #{index + 1}
+                        <Image
+                          src={url.includes('cloudinary.com') 
+                            ? url.replace('/upload/', '/upload/f_auto,q_auto,w_800/') 
+                            : url}
+                          alt={`Output ${index + 1}`}
+                          fill
+                          className="object-cover"
+                          loading="lazy"
+                          unoptimized
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          🔗
+                        </a>
+                        <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                          #{index + 1}
+                        </div>
                       </div>
-                    </div>
+                    ) : null
                   ))}
                 </div>
               </div>
