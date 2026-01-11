@@ -40,12 +40,11 @@ export default function DashboardPage() {
     if (showLoadingSpinner) setLoading(true)
     
     try {
-      // ดึง jobs ตาม admin status
+      // ดึง jobs ทั้งหมดไม่จำกัด
       let query = supabase
         .from('jobs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50)
       
       // ถ้าไม่ใช่ admin ดึงแค่งานของตัวเอง
       if (!isAdmin && userId) {
@@ -73,9 +72,14 @@ export default function DashboardPage() {
       }
       setUserId(user.id)
       
-      // เช็คว่าเป็น admin หรือไม่
-      const adminStatus = user.user_metadata?.is_admin === true || 
-                         user.user_metadata?.is_admin === 'true'
+      // เช็คว่าเป็น admin หรือไม่จาก admin_users table
+      const { data: adminData } = await supabase
+        .from('admin_users')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .single()
+      
+      const adminStatus = !!adminData
       setIsAdmin(adminStatus)
       
       if (adminStatus) {
