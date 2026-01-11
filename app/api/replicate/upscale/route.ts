@@ -33,10 +33,10 @@ export async function POST(req: NextRequest) {
       id: prediction.id,
       status: prediction.status,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Replicate API error:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to upscale' },
+      { error: error instanceof Error ? error.message : 'Failed to upscale' },
       { status: 500 }
     )
   }

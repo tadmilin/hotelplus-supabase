@@ -353,6 +353,7 @@ export default function DashboardPage() {
                         {job.job_type === 'custom-prompt' && '🎨 Custom Prompt'}
                         {job.job_type === 'custom-prompt-template' && '🎨 Custom + Template'}
                         {job.job_type === 'custom-template' && '🖼️ Custom Template'}
+                        {job.job_type === 'gpt-image' && '🎨 GPT Image 1.5'}
                         {job.job_type === 'upscale' && '🔍 Upscale'}
                         {!job.job_type && '📋 Unknown'}
                       </span>

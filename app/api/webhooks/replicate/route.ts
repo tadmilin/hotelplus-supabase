@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
-import { uploadToCloudinary, uploadToCloudinaryFullSize } from '@/lib/cloudinary'
+import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
+import crypto from 'crypto'
 
 // Create Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
@@ -21,7 +22,14 @@ export async function POST(req: NextRequest) {
     const webhookSecret = process.env.REPLICATE_WEBHOOK_SECRET
     const isDevelopment = process.env.NODE_ENV === 'development'
     
-    let webhook: any
+    interface WebhookPayload {
+      id: string
+      status: string
+      output?: unknown
+      error?: unknown
+    }
+
+    let webhook: WebhookPayload | null = null
     
     if (webhookSecret && !isDevelopment) {
       // PRODUCTION MODE: Full signature verification
@@ -35,7 +43,6 @@ export async function POST(req: NextRequest) {
       }
       
       // Replicate uses Svix standard. Secret starting with "whsec_" is base64 encoded.
-      const crypto = require('crypto')
       const body = await req.text()
       const signedContent = `${webhookId}.${webhookTimestamp}.${body}`
 
@@ -125,10 +132,13 @@ export async function POST(req: NextRequest) {
         outputUrls = [output]
       } else if (output && typeof output === 'object') {
         // Handle different output formats
-        if (output.output) {
-          outputUrls = Array.isArray(output.output) ? output.output : [output.output]
-        } else if (output.images) {
-          outputUrls = Array.isArray(output.images) ? output.images : [output.images]
+        const outputObj = output as Record<string, unknown>
+        if ('output' in outputObj) {
+          const nested = outputObj.output
+          outputUrls = Array.isArray(nested) ? nested as string[] : [nested as string]
+        } else if ('images' in outputObj) {
+          const images = outputObj.images
+          outputUrls = Array.isArray(images) ? images as string[] : [images as string]
         }
       }
 
@@ -171,8 +181,8 @@ export async function POST(req: NextRequest) {
 
       console.log('✅ Job updated successfully')
 
-      // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, etc.)
-      const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template']
+      // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, etc.)
+      const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image']
       if (nonUpscaleTypes.includes(job.job_type) && outputUrls.length > 0) {
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)
         
@@ -303,7 +313,7 @@ export async function POST(req: NextRequest) {
 }
 
 // Allow GET for webhook verification (if needed)
-export async function GET(req: NextRequest) {
+export async function GET() {
   return NextResponse.json({ 
     status: 'ok',
     message: 'Webhook endpoint is active',

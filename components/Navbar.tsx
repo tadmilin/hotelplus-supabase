@@ -4,11 +4,12 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
+import { User } from '@supabase/supabase-js'
 
 export default function Navbar() {
   const router = useRouter()
   const pathname = usePathname()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -79,6 +80,16 @@ export default function Navbar() {
                   }`}
                 >
                   🎨 Custom Prompt
+                </Link>
+                <Link 
+                  href="/gpt-image"
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    pathname === '/gpt-image' 
+                      ? 'bg-white text-gray-900 font-semibold' 
+                      : 'hover:bg-gray-700'
+                  }`}
+                >
+                  🎨 GPT Image
                 </Link>
                 <Link 
                   href="/upscale"

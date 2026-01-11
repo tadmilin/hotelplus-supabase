@@ -34,7 +34,7 @@ export default function RegisterPage() {
     }
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
+      const { error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -56,8 +56,8 @@ export default function RegisterPage() {
 
       router.push('/dashboard')
       router.refresh()
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดในการสมัครสมาชิก')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสมัครสมาชิก')
     } finally {
       setLoading(false)
     }
