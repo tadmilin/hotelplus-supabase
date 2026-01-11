@@ -282,25 +282,27 @@ export default function DashboardPage() {
                   {job.output_urls && job.output_urls.length > 0 && job.output_urls[0] ? (
                     <Image
                       src={job.output_urls[0].includes('cloudinary.com') 
-                        ? job.output_urls[0].replace('/upload/', '/upload/f_auto,q_auto,w_400/') 
+                        ? job.output_urls[0].replace('/upload/', '/upload/f_auto,q_70,w_400,c_fill,fl_progressive/') 
                         : job.output_urls[0]}
                       alt="Output"
                       fill
                       className="object-cover"
                       loading="lazy"
                       unoptimized
+                      priority={false}
                     />
                   ) : job.image_urls && job.image_urls.length > 0 && job.image_urls[0] ? (
                     <div className="relative w-full h-full">
                       <Image
                         src={job.image_urls[0].includes('cloudinary.com') 
-                          ? job.image_urls[0].replace('/upload/', '/upload/f_auto,q_auto,w_400/') 
+                          ? job.image_urls[0].replace('/upload/', '/upload/f_auto,q_70,w_400,c_fill,fl_progressive/') 
                           : job.image_urls[0]}
                         alt="Input"
                         fill
                         className="object-cover opacity-50"
                         loading="lazy"
                         unoptimized
+                        priority={false}
                       />
                       <div className="absolute inset-0 flex items-center justify-center">
                         <span className="text-4xl">⏳</span>
@@ -542,7 +544,7 @@ export default function DashboardPage() {
                       >
                         <Image
                           src={url.includes('cloudinary.com') 
-                            ? url.replace('/upload/', '/upload/f_auto,q_auto,w_800/') 
+                            ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
                             : url}
                           alt={`Output ${index + 1}`}
                           fill
