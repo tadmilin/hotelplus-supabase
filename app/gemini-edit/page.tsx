@@ -34,7 +34,7 @@ function GeminiEditContent() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user);
     });
-  }, []);
+  }, [supabase.auth]);
 
   // Function สำหรับ compress รูปลง max 1024px (แก้ปัญหา 413 error)
   const compressImage = (base64: string, maxSize: number = 1024): Promise<string> => {
@@ -193,7 +193,7 @@ function GeminiEditContent() {
                 ✨ Gemini Edit
               </h1>
               <p className="text-gray-600 mt-1">
-                แก้ไขรูปภาพแบบ Conversational - อัพโหลดรูปและพูดคุยกับ AI
+                แก้ไขรูปด้วย AI - อัพโหลดรูปและพิมพ์คำสั่งเพื่อปรับแต่งภาพ
               </p>
             </div>
             <button
@@ -213,7 +213,7 @@ function GeminiEditContent() {
               <div className="text-center text-gray-500 mt-20">
                 <div className="text-6xl mb-4">💬</div>
                 <p className="text-xl font-semibold mb-2">
-                  เริ่มต้นการสนทนา
+                  เริ่มแก้ไขภาพ
                 </p>
                 <p className="text-sm">
                   อัพโหลดรูปและพิมพ์ข้อความเพื่อเริ่มแก้ไขรูปภาพ

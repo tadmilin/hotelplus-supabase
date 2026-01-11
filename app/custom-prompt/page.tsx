@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { FolderTree, type TreeFolder } from '@/components/FolderTree'
+import { User } from '@supabase/supabase-js'
 
 interface DriveImage {
   id: string
@@ -17,7 +18,7 @@ export default function CustomPromptPage() {
   const router = useRouter()
   const supabase = createClient()
   
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [driveFolders, setDriveFolders] = useState<Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>>([])
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
@@ -323,6 +324,8 @@ export default function CustomPromptPage() {
       }
 
       // Create job(s) based on template usage
+      if (!user) throw new Error('User not authenticated')
+      
       if (enableTemplate && finalTemplateUrl) {
         // WITH TEMPLATE: Create single job with all images
         const { data: job, error: jobError } = await supabase
@@ -408,9 +411,10 @@ export default function CustomPromptPage() {
       }
 
       router.push('/dashboard')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error:', error)
-      alert('เกิดข้อผิดพลาดในการสร้างงาน')
+      const message = error instanceof Error ? error.message : 'เกิดข้อผิดพลาด'
+      alert(`เกิดข้อผิดพลาดในการสร้างงาน: ${message}`)
     } finally {
       setCreating(false)
       setStatus('')
@@ -620,7 +624,7 @@ export default function CustomPromptPage() {
                 <select
                   value={outputSize}
                   onChange={(e) => setOutputSize(e.target.value)}
-                  className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 font-medium focus:ring-2 focus:ring-purple-500"
+                  className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 font-medium text-gray-900 focus:ring-2 focus:ring-purple-500"
                 >
                   <option value="match_input_image">🎯 ตามรูปต้นฉบับ (แนะนำ)</option>
                   <option value="1:1">1:1 Square</option>

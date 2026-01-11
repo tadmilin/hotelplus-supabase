@@ -65,8 +65,8 @@ USING (
   )
 );
 
--- 6. เช็คว่าใครเป็น admin (ทดสอบ)
-SELECT u.email, au.user_id IS NOT NULL as is_admin
-FROM auth.users u
-LEFT JOIN public.admin_users au ON u.id = au.user_id
-WHERE u.email LIKE '%admin%' OR u.email LIKE '%tad%';
+-- 6. เสร็จแล้ว! ทดสอบโดยรัน query นี้แยกต่างหาก:
+-- SELECT u.email, au.user_id IS NOT NULL as is_admin
+-- FROM auth.users u
+-- LEFT JOIN public.admin_users au ON u.id = au.user_id
+-- WHERE u.email LIKE '%admin%' OR u.email LIKE '%tad%';
