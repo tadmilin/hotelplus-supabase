@@ -170,6 +170,7 @@ export async function POST(req: NextRequest) {
           status: 'completed',
           output_urls: permanentUrls, // ใช้ Cloudinary URLs แทน
           error: null,
+          completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', job.id)
