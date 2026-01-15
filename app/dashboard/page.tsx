@@ -40,10 +40,11 @@ export default function DashboardPage() {
     if (showLoadingSpinner) setLoading(true)
     
     try {
-      // ดึง jobs ทั้งหมดไม่จำกัด
+      // ดึง jobs ทั้งหมดไม่จำกัด (ยกเว้น upscale)
       let query = supabase
         .from('jobs')
         .select('*')
+        .neq('job_type', 'upscale')  // ← ซ่อน job upscale
         .order('created_at', { ascending: false })
       
       // ถ้าไม่ใช่ admin ดึงแค่งานของตัวเอง
@@ -163,9 +164,32 @@ export default function DashboardPage() {
     })
   }
 
-  function handleViewImages(job: Job) {
-    setSelectedJob(job)
-    setShowModal(true)
+  async function handleViewImages(job: Job) {
+    try {
+      // ดึง upscale jobs ที่เกี่ยวข้อง
+      const { data: upscaleJobs } = await supabase
+        .from('jobs')
+        .select('*')
+        .eq('job_type', 'upscale')
+        .ilike('prompt', `%from job ${job.id}%`)
+        .eq('status', 'completed')
+      
+      // รวมรูป upscale เข้ากับ job หลัก
+      if (upscaleJobs && upscaleJobs.length > 0) {
+        const upscaleUrls = upscaleJobs.flatMap(j => j.output_urls || [])
+        job = {
+          ...job,
+          output_urls: [...(job.output_urls || []), ...upscaleUrls]
+        }
+      }
+      
+      setSelectedJob(job)
+      setShowModal(true)
+    } catch (error) {
+      console.error('Error fetching upscale images:', error)
+      setSelectedJob(job)
+      setShowModal(true)
+    }
   }
 
   function handleEditWithGemini(imageUrl: string) {
@@ -538,6 +562,11 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-800 mb-3">
                   📸 ผลลัพธ์ ({selectedJob.output_urls?.length || 0} รูป)
+                  {selectedJob.output_urls && selectedJob.output_urls.length > (selectedJob.job_type === 'text-to-image' ? 4 : 1) && (
+                    <span className="ml-2 text-sm text-green-600">
+                      (รวมรูป Upscale x2)
+                    </span>
+                  )}
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {selectedJob.output_urls?.map((url, index) => (

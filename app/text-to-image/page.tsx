@@ -3,12 +3,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { User } from '@supabase/supabase-js'
 
 export default function TextToImagePage() {
   const router = useRouter()
   const supabase = createClient()
-  
-  const [user, setUser] = useState<any>(null)
+
+  const [user, setUser] = useState<User | null>(null)
   const [prompt, setPrompt] = useState('')
   const [outputSize, setOutputSize] = useState('1:1')
   const [numImages, setNumImages] = useState(4)
@@ -30,6 +31,11 @@ export default function TextToImagePage() {
   async function handleCreate() {
     if (!prompt.trim()) {
       setError('กรุณากรอก Prompt')
+      return
+    }
+
+    if (!user) {
+      setError('กรุณาเข้าสู่ระบบ')
       return
     }
 
@@ -84,9 +90,10 @@ export default function TextToImagePage() {
 
       // Redirect to dashboard
       router.push('/dashboard')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err)
-      setError(err.message || 'เกิดข้อผิดพลาดในการสร้างรูป')
+      const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสร้างรูป'
+      setError(message)
     } finally {
       setCreating(false)
     }
@@ -174,11 +181,10 @@ export default function TextToImagePage() {
                 <button
                   key={num}
                   onClick={() => setNumImages(num)}
-                  className={`py-3 rounded-lg font-semibold transition-all ${
-                    numImages === num
+                  className={`py-3 rounded-lg font-semibold transition-all ${numImages === num
                       ? 'bg-purple-600 text-white shadow-lg scale-105'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                   disabled={creating}
                 >
                   {num} รูป
@@ -236,9 +242,6 @@ export default function TextToImagePage() {
             <ul className="text-sm text-gray-600 space-y-2">
               <li>✅ ใช้ภาษาอังกฤษ (ผลลัพธ์ดีกว่า)</li>
               <li>✅ ระบุรายละเอียด (สี, แสง, มุมมอง, สไตล์)</li>
-              <li>✅ ใส่คำว่า "high quality", "4k", "photorealistic"</li>
-              <li>❌ หลีกเลี่ยงคำที่คลุมเครือ เช่น "beautiful", "nice"</li>
-              <li>💡 ตัวอย่าง: "Modern hotel lobby with marble floor, gold accents, natural lighting from large windows, contemporary furniture, 4k quality, architectural photography"</li>
             </ul>
           </div>
         </div>
