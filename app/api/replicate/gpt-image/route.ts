@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
       output_compression: outputCompression || 90,
     }
 
-    // Add input images if provided
-    if (inputImages && inputImages.length > 0) {
+    // Add input images if provided (must be array of URLs)
+    if (inputImages && Array.isArray(inputImages) && inputImages.length > 0) {
       input.input_images = inputImages
     }
 

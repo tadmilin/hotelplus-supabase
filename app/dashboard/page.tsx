@@ -14,6 +14,7 @@ interface Job {
   status: string
   prompt: string | null
   template_type: string | null
+  template_url: string | null
   output_size: string | null
   image_urls: string[]
   output_urls: string[]
@@ -21,6 +22,7 @@ interface Job {
   replicate_id: string | null
   created_at: string
   updated_at: string
+  completed_at: string | null
   progress?: number  // 0-100
   _originalCount?: number  // จำนวนรูปต้นฉบับก่อนรวม upscale
 }
@@ -164,7 +166,26 @@ export default function DashboardPage() {
       minute: '2-digit',
     })
   }
-
+  function calculateDuration(startDate: string, endDate: string | null) {
+    if (!endDate) return null
+    const start = new Date(startDate).getTime()
+    const end = new Date(endDate).getTime()
+    const diffMs = end - start
+    
+    if (diffMs < 0) return null
+    
+    const seconds = Math.floor(diffMs / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const hours = Math.floor(minutes / 60)
+    
+    if (hours > 0) {
+      return `${hours} ชม. ${minutes % 60} นาที`
+    } else if (minutes > 0) {
+      return `${minutes} นาที ${seconds % 60} วินาที`
+    } else {
+      return `${seconds} วินาที`
+    }
+  }
   async function handleViewImages(job: Job) {
     try {
       // ดึง upscale jobs ที่เกี่ยวข้อง
@@ -410,6 +431,12 @@ export default function DashboardPage() {
                       <span>📅</span>
                       <span>{formatDate(job.created_at)}</span>
                     </div>
+                    {job.completed_at && (
+                      <div className="flex items-center gap-1.5 text-xs text-green-600 font-semibold">
+                        <span>⏱️</span>
+                        <span>ใช้เวลา {calculateDuration(job.created_at, job.completed_at)}</span>
+                      </div>
+                    )}
                     {job.image_urls && job.image_urls.length > 0 && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-600">
                         <span>🖼️</span>
@@ -417,6 +444,28 @@ export default function DashboardPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Template Preview */}
+                  {job.template_url && (
+                    <div className="mb-3 bg-gradient-to-br from-indigo-50 to-purple-50 p-3 rounded-lg border-2 border-indigo-200">
+                      <div className="text-xs font-semibold text-indigo-800 mb-2 flex items-center gap-1">
+                        <span>🎨</span>
+                        <span>เทมเพลตที่ใช้:</span>
+                      </div>
+                      <div className="relative w-full aspect-square rounded-lg overflow-hidden border-2 border-indigo-300">
+                        <Image
+                          src={job.template_url.includes('cloudinary.com') 
+                            ? job.template_url.replace('/upload/', '/upload/f_auto,q_70,w_400,c_limit,fl_progressive/') 
+                            : job.template_url}
+                          alt="Template"
+                          fill
+                          className="object-cover"
+                          loading="lazy"
+                          unoptimized
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Prompt */}
                   {job.prompt && (
@@ -536,6 +585,37 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
+                
+                {/* Processing Duration */}
+                {selectedJob.completed_at && (
+                  <div className="mt-3 pt-3 border-t border-purple-200">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-xs text-gray-600">⏱️ ระยะเวลาประมวลผล:</span>
+                      <span className="font-semibold text-green-600">
+                        {calculateDuration(selectedJob.created_at, selectedJob.completed_at)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Template Preview */}
+                {selectedJob.template_url && (
+                  <div className="mt-3 pt-3 border-t border-purple-200">
+                    <div className="text-xs font-semibold text-gray-700 mb-2">🎨 เทมเพลตที่ใช้:</div>
+                    <div className="w-32 h-32 relative rounded-lg overflow-hidden border-2 border-indigo-300">
+                      <Image
+                        src={selectedJob.template_url.includes('cloudinary.com') 
+                          ? selectedJob.template_url.replace('/upload/', '/upload/f_auto,q_70,w_300,c_limit,fl_progressive/') 
+                          : selectedJob.template_url}
+                        alt="Template"
+                        fill
+                        className="object-cover"
+                        loading="lazy"
+                        unoptimized
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 {/* Input Images Preview */}
                 {selectedJob.image_urls && selectedJob.image_urls.length > 0 && (

@@ -64,7 +64,7 @@ export default function GptImagePage() {
         setUploading(true)
         const formData = new FormData()
         inputImages.forEach((file) => {
-          formData.append('images', file)
+          formData.append('files', file) // Use 'files' to match API
         })
 
         const uploadResponse = await fetch('/api/upload-images', {
@@ -77,7 +77,8 @@ export default function GptImagePage() {
         }
 
         const uploadData = await uploadResponse.json()
-        imageUrls = uploadData.urls
+        // Extract URLs from the images array
+        imageUrls = uploadData.images?.map((img: { url: string }) => img.url) || []
         setUploading(false)
       }
 

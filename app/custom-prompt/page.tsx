@@ -339,6 +339,7 @@ export default function CustomPromptPage() {
             prompt: customPrompt,
             output_size: outputSize,
             image_urls: imageUrls,
+            template_url: finalTemplateUrl,
             output_urls: [],
           })
           .select()
