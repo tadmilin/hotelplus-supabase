@@ -22,6 +22,7 @@ interface Job {
   created_at: string
   updated_at: string
   progress?: number  // 0-100
+  _originalCount?: number  // จำนวนรูปต้นฉบับก่อนรวม upscale
 }
 
 export default function DashboardPage() {
@@ -174,12 +175,16 @@ export default function DashboardPage() {
         .ilike('prompt', `%from job ${job.id}%`)
         .eq('status', 'completed')
       
+      // เก็บจำนวนรูปต้นฉบับเพื่อแยก section
+      const originalCount = job.output_urls?.length || 0
+      
       // รวมรูป upscale เข้ากับ job หลัก
       if (upscaleJobs && upscaleJobs.length > 0) {
         const upscaleUrls = upscaleJobs.flatMap(j => j.output_urls || [])
         job = {
           ...job,
-          output_urls: [...(job.output_urls || []), ...upscaleUrls]
+          output_urls: [...(job.output_urls || []), ...upscaleUrls],
+          _originalCount: originalCount
         }
       }
       
@@ -560,48 +565,140 @@ export default function DashboardPage() {
 
               {/* Output Images Grid */}
               <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                  📸 ผลลัพธ์ ({selectedJob.output_urls?.length || 0} รูป)
-                  {selectedJob.output_urls && selectedJob.output_urls.length > (selectedJob.job_type === 'text-to-image' ? 4 : 1) && (
-                    <span className="ml-2 text-sm text-green-600">
-                      (รวมรูป Upscale x2)
-                    </span>
-                  )}
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {selectedJob.output_urls?.map((url, index) => (
-                    url ? (
-                      <div
-                        key={index}
-                        className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
-                      >
-                        <Image
-                          src={url.includes('cloudinary.com') 
-                            ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
-                            : url}
-                          alt={`Output ${index + 1}`}
-                          fill
-                          className="object-cover"
-                          loading="lazy"
-                          unoptimized
-                        />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          🔗
-                        </a>
-                        <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                          #{index + 1}
+                {selectedJob._originalCount && selectedJob._originalCount > 0 ? (
+                  <>
+                    {/* Original Images */}
+                    <div className="mb-8">
+                      <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                        📸 รูปต้นฉบับ ({selectedJob._originalCount} รูป)
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {selectedJob.output_urls?.slice(0, selectedJob._originalCount).map((url, index) => (
+                          url ? (
+                            <div
+                              key={index}
+                              className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
+                            >
+                              <Image
+                                src={url.includes('cloudinary.com') 
+                                  ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
+                                  : url}
+                                alt={`Original ${index + 1}`}
+                                fill
+                                className="object-cover"
+                                loading="lazy"
+                                unoptimized
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            </div>
+                          ) : null
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Upscaled Images */}
+                    {selectedJob.output_urls?.length > selectedJob._originalCount && (
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                          🔍 รูปที่อัพสเกล x2 ({selectedJob.output_urls.length - selectedJob._originalCount} รูป)
+                          <span className="ml-2 text-sm text-green-600">
+                            (ความละเอียดสูงขึ้น 2 เท่า)
+                          </span>
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                          {selectedJob.output_urls?.slice(selectedJob._originalCount).map((url, index) => (
+                            url ? (
+                              <div
+                                key={index}
+                                className="aspect-square relative rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 transition-colors group"
+                              >
+                                <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full font-semibold shadow-lg z-10">
+                                  🔍 Upscaled
+                                </div>
+                                <Image
+                                  src={url.includes('cloudinary.com') 
+                                    ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
+                                    : url}
+                                  alt={`Upscaled ${index + 1}`}
+                                  fill
+                                  className="object-cover"
+                                  loading="lazy"
+                                  unoptimized
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                                <a
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="absolute top-2 right-2 bg-white/90 hover:bg-white text-green-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                  </svg>
+                                </a>
+                              </div>
+                            ) : null
+                          ))}
                         </div>
                       </div>
-                    ) : null
-                  ))}
-                </div>
+                    )}
+                  </>
+                ) : (
+                  /* ถ้าไม่มีข้อมูล _originalCount แสดงแบบเดิม */
+                  <>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                      📸 ผลลัพธ์ ({selectedJob.output_urls?.length || 0} รูป)
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {selectedJob.output_urls?.map((url, index) => (
+                        url ? (
+                          <div
+                            key={index}
+                            className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
+                          >
+                            <Image
+                              src={url.includes('cloudinary.com') 
+                                ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
+                                : url}
+                              alt={`Output ${index + 1}`}
+                              fill
+                              className="object-cover"
+                              loading="lazy"
+                              unoptimized
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                            </a>
+                            <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                              #{index + 1}
+                            </div>
+                          </div>
+                        ) : null
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
