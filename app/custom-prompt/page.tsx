@@ -620,17 +620,20 @@ export default function CustomPromptPage() {
                 <span>⚙️</span>
                 <span>เลือก Drives</span>
               </button>
-              <button
-                onClick={async () => {
-                  await syncDrives()
-                  await fetchDriveFolders()
-                }}
-                disabled={syncing || isLoadingFolders}
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
-              >
-                <span>{syncing ? '⏳' : '🔄'}</span>
-                <span>{syncing ? 'Syncing...' : 'อัพเดทรายการ'}</span>
-              </button>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={async () => {
+                    await syncDrives()
+                    await fetchDriveFolders()
+                  }}
+                  disabled={syncing || isLoadingFolders}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                >
+                  <span>{syncing ? '⏳' : '🔄'}</span>
+                  <span>{syncing ? 'Syncing...' : 'อัพเดทรายการ'}</span>
+                </button>
+                <p className="text-xs text-gray-500 text-center">💡 กดเมื่อมีโฟลเดอร์ใหม่</p>
+              </div>
             </div>
           </div>
         </div>

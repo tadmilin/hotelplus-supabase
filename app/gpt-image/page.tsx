@@ -4,6 +4,14 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
+import { FolderTree, type TreeFolder } from '@/components/FolderTree'
+
+interface DriveImage {
+  id: string
+  name: string
+  thumbnailUrl: string
+  url: string
+}
 
 export default function GptImagePage() {
   const router = useRouter()
@@ -23,6 +31,21 @@ export default function GptImagePage() {
   const [creating, setCreating] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  
+  // Drive management
+  const [driveFolders, setDriveFolders] = useState<Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>>([])
+  const [selectedFolderId, setSelectedFolderId] = useState('')
+  const [driveImages, setDriveImages] = useState<DriveImage[]>([])
+  const [selectedDriveImages, setSelectedDriveImages] = useState<DriveImage[]>([])
+  const [imageCounts, setImageCounts] = useState<Record<string, number>>({})
+  const [loadingImages, setLoadingImages] = useState(false)
+  const [loadingTimer, setLoadingTimer] = useState(0)
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [availableDrives, setAvailableDrives] = useState<Array<{ driveId: string; driveName: string }>>([])
+  const [showDriveSelector, setShowDriveSelector] = useState(false)
+  const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
+  const [savingDrives, setSavingDrives] = useState(false)
 
   useEffect(() => {
     async function checkAuth() {
@@ -32,9 +55,197 @@ export default function GptImagePage() {
         return
       }
       setUser(user)
+      await loadAvailableDrives()
+      
+      // Auto-sync if no drives found
+      const drives = await checkDrivesExist()
+      if (drives === 0) {
+        console.log('No drives found, auto-syncing...')
+        await syncDrives()
+      }
+      
+      await fetchDriveFolders()
     }
     checkAuth()
-  }, [router, supabase])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function checkDrivesExist() {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=count`, {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          'Prefer': 'count=exact'
+        }
+      })
+      if (res.ok) {
+        const count = res.headers.get('content-range')?.split('/')[1]
+        return parseInt(count || '0')
+      }
+    } catch {
+      console.error('Error checking drives')
+    }
+    return 0
+  }
+
+  async function loadAvailableDrives() {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=drive_id,drive_name&order=drive_name`, {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        }
+      })
+      if (res.ok) {
+        const drives = await res.json()
+        setAvailableDrives(drives)
+      }
+    } catch {
+      console.error('Error loading available drives')
+    }
+  }
+
+  async function syncDrives() {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/drive/sync', { method: 'POST' })
+      if (res.ok) {
+        alert('✅ Sync สำเร็จ! กำลังโหลดใหม่...')
+        await loadAvailableDrives()
+      } else {
+        const data = await res.json()
+        alert(`❌ Sync ล้มเหลว: ${data.error}`)
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function saveDriveSelection() {
+    if (selectedDriveIds.size === 0) {
+      alert('กรุณาเลือกอย่างน้อย 1 Drive')
+      return
+    }
+
+    setSavingDrives(true)
+    try {
+      const res = await fetch('/api/drive/user-drives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveIds: Array.from(selectedDriveIds) }),
+      })
+
+      if (res.ok) {
+        alert('✅ บันทึกสำเร็จ! กำลังโหลดใหม่...')
+        setShowDriveSelector(false)
+        await fetchDriveFolders()
+      } else {
+        alert('❌ บันทึกไม่สำเร็จ')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    } finally {
+      setSavingDrives(false)
+    }
+  }
+
+  async function fetchDriveFolders() {
+    setIsLoadingFolders(true)
+    setLoadingTimer(0)
+    
+    const timerInterval = setInterval(() => {
+      setLoadingTimer(prev => prev + 0.1)
+    }, 100)
+    
+    try {
+      const res = await fetch('/api/drive/list-folders')
+      if (res.ok) {
+        const data = await res.json()
+        setDriveFolders(data.drives || [])
+        await countImagesInFolders(data.drives || [])
+      }
+    } catch (error) {
+      console.error('Error fetching Drive folders:', error)
+    } finally {
+      clearInterval(timerInterval)
+      setIsLoadingFolders(false)
+    }
+  }
+
+  async function countImagesInFolders(drives: Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>) {
+    const folderIds: string[] = []
+    
+    function collectFolderIds(folders: TreeFolder[]) {
+      for (const folder of folders) {
+        folderIds.push(folder.id)
+        if (folder.children && folder.children.length > 0) {
+          collectFolderIds(folder.children)
+        }
+      }
+    }
+    
+    drives.forEach(drive => collectFolderIds(drive.folders))
+    
+    if (folderIds.length === 0) return
+    
+    try {
+      const res = await fetch('/api/drive/count-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderIds }),
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setImageCounts(data.counts || {})
+      }
+    } catch (error) {
+      console.error('Error counting images:', error)
+    }
+  }
+
+  async function loadDriveImages() {
+    if (!selectedFolderId) {
+      alert('กรุณาเลือกโฟลเดอร์ก่อน')
+      return
+    }
+
+    setLoadingImages(true)
+
+    try {
+      const res = await fetch('/api/drive/list-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: selectedFolderId }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setDriveImages(data.images || [])
+      } else {
+        alert('Failed to load images')
+      }
+    } catch (error) {
+      console.error('Error fetching images:', error)
+      alert('Error loading images')
+    } finally {
+      setLoadingImages(false)
+    }
+  }
+
+  function toggleDriveImage(image: DriveImage) {
+    setSelectedDriveImages(prev => {
+      const exists = prev.find(img => img.id === image.id)
+      if (exists) {
+        return prev.filter(img => img.id !== image.id)
+      } else {
+        return [...prev, image]
+      }
+    })
+  }
 
   async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
@@ -58,13 +269,15 @@ export default function GptImagePage() {
     setError('')
 
     try {
-      // Upload input images if any
+      // Combine local uploads and Drive images
       let imageUrls: string[] = []
+      
+      // Upload input images if any
       if (inputImages.length > 0) {
         setUploading(true)
         const formData = new FormData()
         inputImages.forEach((file) => {
-          formData.append('files', file) // Use 'files' to match API
+          formData.append('files', file)
         })
 
         const uploadResponse = await fetch('/api/upload-images', {
@@ -77,9 +290,13 @@ export default function GptImagePage() {
         }
 
         const uploadData = await uploadResponse.json()
-        // Extract URLs from the images array
         imageUrls = uploadData.images?.map((img: { url: string }) => img.url) || []
         setUploading(false)
+      }
+      
+      // Add Drive images
+      if (selectedDriveImages.length > 0) {
+        imageUrls = [...imageUrls, ...selectedDriveImages.map(img => img.url)]
       }
 
       // Create job in database
@@ -168,12 +385,47 @@ export default function GptImagePage() {
       <div className="container mx-auto px-4 max-w-4xl">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-purple-900 mb-2">
-            🎨 GPT Image 1.5
-          </h1>
-          <p className="text-gray-600">
-            สร้างและแก้ไขรูปด้วย OpenAI GPT Image 1.5 - ควบคุมได้อย่างแม่นยำ พร้อมอัปสเกลอัตโนมัติ
-          </p>
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-purple-900 mb-2">
+                🎨 GPT Image 1.5
+              </h1>
+              <p className="text-gray-600">
+                สร้างและแก้ไขรูปด้วย OpenAI GPT Image 1.5 - ควบคุมได้อย่างแม่นยำ พร้อมอัปสเกลอัตโนมัติ
+              </p>
+              {isLoadingFolders && (
+                <div className="mt-3 flex items-center gap-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-lg">
+                  <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                  <span className="text-sm font-semibold">
+                    กำลังโหลดข้อมูลจากไดร์ฟ... {loadingTimer.toFixed(1)}s
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setShowDriveSelector(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 whitespace-nowrap text-sm"
+              >
+                <span>⚙️</span>
+                <span>เลือก Drives</span>
+              </button>
+              <button
+                onClick={async () => {
+                  await syncDrives()
+                  await fetchDriveFolders()
+                }}
+                disabled={syncing || isLoadingFolders}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap text-sm"
+              >
+                <span>{syncing ? '⏳' : '🔄'}</span>
+                <span>{syncing ? 'Syncing...' : 'อัพเดทรายการ'}</span>
+              </button>
+              <p className="text-xs text-gray-500 text-center">
+                💡 กดเมื่อมีโฟลเดอร์ใหม่
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Form */}
@@ -201,6 +453,92 @@ export default function GptImagePage() {
               💡 เคล็ดลับ: ใช้เครื่องหมาย &quot;...&quot; สำหรับข้อความที่ต้องการให้แสดงในรูป ({prompt.length} ตัวอักษร)
             </p>
           </div>
+
+          {/* Google Drive Images */}
+          {driveFolders.length > 0 && (
+            <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl p-6 border-2 border-green-200">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">📂 เลือกรูปจาก Google Drive</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Folder Tree */}
+                <div className="bg-white rounded-lg p-4 max-h-96 overflow-y-auto">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">โฟลเดอร์:</h4>
+                  {driveFolders.map((drive) => (
+                    <div key={drive.driveId} className="mb-4">
+                      <h5 className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-2">
+                        <span>📱</span>
+                        <span>{drive.driveName}</span>
+                      </h5>
+                      <FolderTree
+                        folders={drive.folders}
+                        onSelectFolder={setSelectedFolderId}
+                        selectedFolderId={selectedFolderId}
+                        imageCounts={imageCounts}
+                      />
+                    </div>
+                  ))}
+                  {selectedFolderId && (
+                    <button
+                      onClick={loadDriveImages}
+                      disabled={loadingImages}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg font-semibold mt-4 disabled:opacity-50"
+                    >
+                      {loadingImages ? '⏳ กำลังโหลด...' : '📥 โหลดรูปจากโฟลเดอร์นี้'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Images Grid */}
+                <div className="bg-white rounded-lg p-4 max-h-96 overflow-y-auto">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                    รูปในโฟลเดอร์ ({driveImages.length} รูป)
+                  </h4>
+                  {driveImages.length > 0 ? (
+                    <div className="grid grid-cols-3 gap-2">
+                      {driveImages.map((img) => {
+                        const isSelected = selectedDriveImages.some(selected => selected.id === img.id)
+                        return (
+                          <div
+                            key={img.id}
+                            onClick={() => toggleDriveImage(img)}
+                            className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
+                              isSelected
+                                ? 'ring-4 ring-green-500 scale-95'
+                                : 'ring-2 ring-gray-200 hover:ring-gray-400'
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={img.thumbnailUrl}
+                              alt={img.name}
+                              className="w-full h-full object-cover"
+                            />
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
+                                <span className="text-2xl">✓</span>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-center py-8">
+                      เลือกโฟลเดอร์แล้วกดโหลด
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {selectedDriveImages.length > 0 && (
+                <div className="mt-4 p-3 bg-green-100 rounded-lg">
+                  <p className="text-sm font-semibold text-green-800">
+                    ✅ เลือกแล้ว {selectedDriveImages.length} รูปจาก Drive
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Input Images (Optional) */}
           <div>
@@ -418,6 +756,76 @@ export default function GptImagePage() {
             </ul>
           </div>
         </div>
+
+        {/* Drive Selector Modal */}
+        {showDriveSelector && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+              <h2 className="text-2xl font-bold text-purple-900 mb-4">
+                เลือก Drives ที่ต้องการใช้งาน
+              </h2>
+              <p className="text-gray-600 mb-6">
+                เลือก Drives ที่คุณต้องการเห็น - จะโหลดเร็วขึ้นมาก! 🚀
+              </p>
+
+              {availableDrives.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-4">ไม่มี Drives ในระบบ</p>
+                  <button
+                    onClick={syncDrives}
+                    disabled={syncing}
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold"
+                  >
+                    {syncing ? '⏳ กำลัง Sync...' : '🔄 Sync Drives จาก Google'}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
+                    {availableDrives.map(drive => (
+                      <label
+                        key={drive.driveId}
+                        className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer border-2 border-transparent hover:border-indigo-200 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedDriveIds.has(drive.driveId)}
+                          onChange={(e) => {
+                            const newSet = new Set(selectedDriveIds)
+                            if (e.target.checked) {
+                              newSet.add(drive.driveId)
+                            } else {
+                              newSet.delete(drive.driveId)
+                            }
+                            setSelectedDriveIds(newSet)
+                          }}
+                          className="w-5 h-5 text-indigo-600 rounded"
+                        />
+                        <span className="font-semibold text-gray-800">{drive.driveName}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={saveDriveSelection}
+                      disabled={savingDrives || selectedDriveIds.size === 0}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {savingDrives ? '⏳ กำลังบันทึก...' : `💾 บันทึก (${selectedDriveIds.size})`}
+                    </button>
+                    <button
+                      onClick={() => setShowDriveSelector(false)}
+                      className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 rounded-lg font-semibold transition-colors"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
