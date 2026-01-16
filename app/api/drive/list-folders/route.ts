@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { getDriveClient } from '@/lib/google-drive'
+import { createClient } from '@/lib/supabase/server'
+import { drive_v3 } from 'googleapis'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const drive = getDriveClient()
     
@@ -9,22 +11,66 @@ export async function GET(req: NextRequest) {
     if (!drive) {
       return NextResponse.json({ drives: [] })
     }
-    
-    // List all shared drives
-    const response = await drive.drives.list({
-      pageSize: 100,
-    })
 
-    const drives = response.data.drives || []
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
     
-    // For each drive, get folder structure
+    let drivesToLoad: Array<{ driveId: string; driveName: string }> = []
+    
+    if (user) {
+      // Try to get user's selected drives from database
+      const { data: userDrives } = await supabase
+        .from('user_drive_access')
+        .select(`
+          drive_id,
+          google_drives (
+            drive_id,
+            drive_name
+          )
+        `)
+        .eq('user_id', user.id)
+      
+      if (userDrives && userDrives.length > 0) {
+        // User has selected drives - use them (FAST!)
+        console.log(`✅ Loading ${userDrives.length} selected drives for user ${user.email}`)
+        drivesToLoad = userDrives.map((item) => ({
+          driveId: (item as unknown as { google_drives: { drive_id: string } }).google_drives.drive_id,
+          driveName: (item as unknown as { google_drives: { drive_name: string } }).google_drives.drive_name
+        }))
+      } else {
+        // No selection yet - show all available drives from google_drives table
+        console.log(`ℹ️ No drive selection for user ${user.email}, showing all synced drives`)
+        const { data: allDrives } = await supabase
+          .from('google_drives')
+          .select('drive_id, drive_name')
+          .order('drive_name')
+        
+        drivesToLoad = (allDrives || []).map(d => ({
+          driveId: d.drive_id,
+          driveName: d.drive_name
+        }))
+      }
+    } else {
+      // Not logged in - show all synced drives
+      const { data: allDrives } = await supabase
+        .from('google_drives')
+        .select('drive_id, drive_name')
+        .order('drive_name')
+      
+      drivesToLoad = (allDrives || []).map(d => ({
+        driveId: d.drive_id,
+        driveName: d.drive_name
+      }))
+    }
+    
+    // For each drive, get folder structure from Google
     const driveData = []
     
-    for (const driveItem of drives) {
-      const folders = await getFolderStructure(drive, driveItem.id!)
+    for (const driveItem of drivesToLoad) {
+      const folders = await getFolderStructure(drive, driveItem.driveId)
       driveData.push({
-        driveId: driveItem.id!,
-        driveName: driveItem.name!,
+        driveId: driveItem.driveId,
+        driveName: driveItem.driveName,
         folders: folders,
       })
     }
@@ -39,7 +85,9 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function getFolderStructure(drive: any, driveId: string, parentId?: string): Promise<any[]> {
+type FolderStructure = { id: string; name: string; children: FolderStructure[] }
+
+async function getFolderStructure(drive: drive_v3.Drive, driveId: string, parentId?: string): Promise<FolderStructure[]> {
   try {
     const query = parentId
       ? `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`

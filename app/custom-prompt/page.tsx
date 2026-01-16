@@ -30,6 +30,13 @@ export default function CustomPromptPage() {
   const [status, setStatus] = useState('')
   const [uploadingFiles, setUploadingFiles] = useState(false)
   
+  // Drive management
+  const [showDriveSelector, setShowDriveSelector] = useState(false)
+  const [availableDrives, setAvailableDrives] = useState<Array<{ driveId: string; driveName: string }>>([])
+  const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
+  const [savingDrives, setSavingDrives] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  
   // Template state
   const [enableTemplate, setEnableTemplate] = useState(false)
   const [templateFolderId, setTemplateFolderId] = useState('')
@@ -45,9 +52,74 @@ export default function CustomPromptPage() {
       }
       setUser(user)
       await fetchDriveFolders()
+      await loadAvailableDrives()
     }
     checkAuth()
-  }, [router, supabase])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function loadAvailableDrives() {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=drive_id,drive_name&order=drive_name`, {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        }
+      })
+      if (res.ok) {
+        const drives = await res.json()
+        setAvailableDrives(drives)
+      }
+    } catch {
+      console.error('Error loading available drives')
+    }
+  }
+
+  async function syncDrives() {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/drive/sync', { method: 'POST' })
+      if (res.ok) {
+        alert('✅ Sync สำเร็จ! กำลังโหลดใหม่...')
+        await loadAvailableDrives()
+      } else {
+        const data = await res.json()
+        alert(`❌ Sync ล้มเหลว: ${data.error}`)
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function saveDriveSelection() {
+    if (selectedDriveIds.size === 0) {
+      alert('กรุณาเลือกอย่างน้อย 1 Drive')
+      return
+    }
+
+    setSavingDrives(true)
+    try {
+      const res = await fetch('/api/drive/user-drives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveIds: Array.from(selectedDriveIds) }),
+      })
+
+      if (res.ok) {
+        alert('✅ บันทึกสำเร็จ! กำลังโหลดใหม่...')
+        setShowDriveSelector(false)
+        await fetchDriveFolders()
+      } else {
+        alert('❌ บันทึกไม่สำเร็จ')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    } finally {
+      setSavingDrives(false)
+    }
+  }
 
   async function fetchDriveFolders() {
     try {
@@ -438,13 +510,104 @@ export default function CustomPromptPage() {
       <div className="container mx-auto px-4 max-w-7xl">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-purple-900 mb-2">
-            🎨 Custom Prompt
-          </h1>
-          <p className="text-gray-600">
-            เลือกรูปจาก Drive หรืออัพโหลดจากเครื่อง + เขียน Prompt + Template (ไม่บังคับ)
-          </p>
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-purple-900 mb-2">
+                🎨 Custom Prompt
+              </h1>
+              <p className="text-gray-600">
+                เลือกรูปจาก Drive หรืออัพโหลดจากเครื่อง + เขียน Prompt + Template (ไม่บังคับ)
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDriveSelector(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 whitespace-nowrap"
+              >
+                <span>⚙️</span>
+                <span>เลือก Drives</span>
+              </button>
+              <button
+                onClick={syncDrives}
+                disabled={syncing}
+                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+              >
+                <span>{syncing ? '⏳' : '🔄'}</span>
+                <span>{syncing ? 'Syncing...' : 'Sync'}</span>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Drive Selector Modal */}
+        {showDriveSelector && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+              <h2 className="text-2xl font-bold text-purple-900 mb-4">
+                เลือก Drives ที่ต้องการใช้งาน
+              </h2>
+              <p className="text-gray-600 mb-6">
+                เลือก Drives ที่คุณต้องการเห็น - จะโหลดเร็วขึ้นมาก! 🚀
+              </p>
+
+              {availableDrives.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-4">ไม่มี Drives ในระบบ</p>
+                  <button
+                    onClick={syncDrives}
+                    disabled={syncing}
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold"
+                  >
+                    {syncing ? '⏳ กำลัง Sync...' : '🔄 Sync Drives จาก Google'}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3 mb-6 max-h-96 overflow-y-auto">
+                    {availableDrives.map(drive => (
+                      <label
+                        key={drive.driveId}
+                        className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer border-2 border-transparent hover:border-indigo-200 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedDriveIds.has(drive.driveId)}
+                          onChange={(e) => {
+                            const newSet = new Set(selectedDriveIds)
+                            if (e.target.checked) {
+                              newSet.add(drive.driveId)
+                            } else {
+                              newSet.delete(drive.driveId)
+                            }
+                            setSelectedDriveIds(newSet)
+                          }}
+                          className="w-5 h-5 text-indigo-600 rounded"
+                        />
+                        <span className="font-semibold text-gray-800">{drive.driveName}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={saveDriveSelection}
+                      disabled={savingDrives || selectedDriveIds.size === 0}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {savingDrives ? '⏳ กำลังบันทึก...' : `💾 บันทึก (${selectedDriveIds.size})`}
+                    </button>
+                    <button
+                      onClick={() => setShowDriveSelector(false)}
+                      className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 rounded-lg font-semibold transition-colors"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Status */}
         {status && (
