@@ -22,11 +22,30 @@ export async function POST() {
     }
 
     // Fetch drives from Google
+    // Try Shared Drives first
     const response = await drive.drives.list({ pageSize: 100 })
-    const drives = response.data.drives || []
+    let drives = response.data.drives || []
+
+    // If no Shared Drives, fall back to My Drive folders
+    if (drives.length === 0) {
+      console.log('No Shared Drives found, checking My Drive...')
+      const myDriveResponse = await drive.files.list({
+        q: "mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false",
+        pageSize: 100,
+        fields: 'files(id, name)'
+      })
+      
+      // Convert My Drive folders to drive format
+      if (myDriveResponse.data.files && myDriveResponse.data.files.length > 0) {
+        drives = [{
+          id: 'my-drive',
+          name: 'My Drive'
+        }]
+      }
+    }
 
     if (drives.length === 0) {
-      return NextResponse.json({ error: 'No drives found' }, { status: 404 })
+      return NextResponse.json({ error: 'No drives or folders found. Make sure Service Account has access.' }, { status: 404 })
     }
 
     // Use Service Role client for admin operations
@@ -64,6 +83,10 @@ export async function POST() {
     })
   } catch (error) {
     console.error('Sync error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ 
+      error: 'Sync failed', 
+      details: errorMessage 
+    }, { status: 500 })
   }
 }
