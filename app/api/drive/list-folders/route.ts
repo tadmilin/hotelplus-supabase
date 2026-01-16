@@ -33,10 +33,30 @@ export async function GET() {
       if (userDrives && userDrives.length > 0) {
         // User has selected drives - use them (FAST!)
         console.log(`✅ Loading ${userDrives.length} selected drives for user ${user.email}`)
-        drivesToLoad = userDrives.map((item) => ({
-          driveId: (item as unknown as { google_drives: { drive_id: string } }).google_drives.drive_id,
-          driveName: (item as unknown as { google_drives: { drive_name: string } }).google_drives.drive_name
-        }))
+        
+        // Filter out null google_drives (invalid references)
+        drivesToLoad = userDrives
+          .filter((item) => {
+            const driveData = (item as unknown as { google_drives: { drive_id: string; drive_name: string } | null }).google_drives
+            return driveData !== null
+          })
+          .map((item) => ({
+            driveId: (item as unknown as { google_drives: { drive_id: string } }).google_drives.drive_id,
+            driveName: (item as unknown as { google_drives: { drive_name: string } }).google_drives.drive_name
+          }))
+        
+        if (drivesToLoad.length === 0) {
+          console.log(`⚠️ User has selections but no valid drives found, showing all synced drives`)
+          const { data: allDrives } = await supabase
+            .from('google_drives')
+            .select('drive_id, drive_name')
+            .order('drive_name')
+          
+          drivesToLoad = (allDrives || []).map(d => ({
+            driveId: d.drive_id,
+            driveName: d.drive_name
+          }))
+        }
       } else {
         // No selection yet - show all available drives from google_drives table
         console.log(`ℹ️ No drive selection for user ${user.email}, showing all synced drives`)
