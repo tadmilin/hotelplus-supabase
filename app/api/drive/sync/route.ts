@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getDriveClient } from '@/lib/google-drive'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
-// POST: Trigger sync from Google API to database (Admin only)
+// POST: Trigger sync from Google API to database (Authenticated users)
 export async function POST() {
   try {
     const supabase = await createClient()
@@ -13,17 +13,9 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Check if user is admin (optional - remove if all users can sync)
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (profile?.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
-    }
-
+    // Allow authenticated users to sync
+    // Sync only updates the drive list (read-only operation from Google)
+    
     const drive = getDriveClient()
     if (!drive) {
       return NextResponse.json({ error: 'Google Drive not configured' }, { status: 500 })
