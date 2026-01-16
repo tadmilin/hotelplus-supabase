@@ -23,29 +23,40 @@ export async function POST() {
 
     // Fetch drives from Google
     // Try Shared Drives first
+    console.log('🔍 Fetching Shared Drives...')
     const response = await drive.drives.list({ pageSize: 100 })
     let drives = response.data.drives || []
+    console.log(`✅ Found ${drives.length} Shared Drives`)
 
-    // If no Shared Drives, fall back to My Drive folders
+    // If no Shared Drives, check for shared folders in My Drive
     if (drives.length === 0) {
-      console.log('No Shared Drives found, checking My Drive...')
-      const myDriveResponse = await drive.files.list({
-        q: "mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false",
+      console.log('⚠️ No Shared Drives found. Checking for shared folders...')
+      
+      // Try to list files that are shared with the service account
+      const sharedResponse = await drive.files.list({
+        q: "mimeType='application/vnd.google-apps.folder' and sharedWithMe=true and trashed=false",
         pageSize: 100,
-        fields: 'files(id, name)'
+        fields: 'files(id, name, owners)',
+        supportsAllDrives: true
       })
       
-      // Convert My Drive folders to drive format
-      if (myDriveResponse.data.files && myDriveResponse.data.files.length > 0) {
-        drives = [{
-          id: 'my-drive',
-          name: 'My Drive'
-        }]
+      console.log(`📁 Found ${sharedResponse.data.files?.length || 0} shared folders`)
+      
+      // Convert shared folders to drive format
+      if (sharedResponse.data.files && sharedResponse.data.files.length > 0) {
+        drives = sharedResponse.data.files.map(folder => ({
+          id: folder.id!,
+          name: folder.name!
+        }))
       }
     }
 
     if (drives.length === 0) {
-      return NextResponse.json({ error: 'No drives or folders found. Make sure Service Account has access.' }, { status: 404 })
+      return NextResponse.json({ 
+        error: 'No drives or folders accessible to Service Account',
+        hint: 'Please add Service Account to Shared Drives or share folders with it',
+        serviceAccount: 'ai-backend@testapi-480011.iam.gserviceaccount.com'
+      }, { status: 404 })
     }
 
     // Use Service Role client for admin operations
