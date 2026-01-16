@@ -23,6 +23,7 @@ export default function CustomPromptPage() {
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
   const [selectedImagesMap, setSelectedImagesMap] = useState<Map<string, DriveImage>>(new Map())
+  const [imageCounts, setImageCounts] = useState<Record<string, number>>({})
   const [customPrompt, setCustomPrompt] = useState('')
   const [outputSize, setOutputSize] = useState('match_input_image')
   const [creating, setCreating] = useState(false)
@@ -36,6 +37,8 @@ export default function CustomPromptPage() {
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [loadingTimer, setLoadingTimer] = useState(0)
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false)
   
   // Template state
   const [enableTemplate, setEnableTemplate] = useState(false)
@@ -51,12 +54,39 @@ export default function CustomPromptPage() {
         return
       }
       setUser(user)
-      await fetchDriveFolders()
       await loadAvailableDrives()
+      
+      // Auto-sync if no drives found
+      const drives = await checkDrivesExist()
+      if (drives === 0) {
+        console.log('No drives found, auto-syncing...')
+        await syncDrives()
+      }
+      
+      await fetchDriveFolders()
     }
     checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function checkDrivesExist() {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=count`, {
+        headers: {
+          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          'Prefer': 'count=exact'
+        }
+      })
+      if (res.ok) {
+        const count = res.headers.get('content-range')?.split('/')[1]
+        return parseInt(count || '0')
+      }
+    } catch {
+      console.error('Error checking drives')
+    }
+    return 0
+  }
 
   async function loadAvailableDrives() {
     try {
@@ -122,14 +152,69 @@ export default function CustomPromptPage() {
   }
 
   async function fetchDriveFolders() {
+    setIsLoadingFolders(true)
+    setLoadingTimer(0)
+    
+    // Start timer
+    const timerInterval = setInterval(() => {
+      setLoadingTimer(prev => prev + 0.1)
+    }, 100)
+    
     try {
+      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
         setDriveFolders(data.drives || [])
+        
+        // Count images in all folders
+        await countImagesInFolders(data.drives || [])
+        
+        setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
+        setTimeout(() => setStatus(''), 3000)
+      } else {
+        setStatus('❌ โหลดล้มเหลว')
       }
     } catch (error) {
       console.error('Error fetching Drive folders:', error)
+      setStatus('❌ เกิดข้อผิดพลาด')
+    } finally {
+      clearInterval(timerInterval)
+      setIsLoadingFolders(false)
+    }
+  }
+
+  async function countImagesInFolders(drives: Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>) {
+    // Collect all folder IDs
+    const folderIds: string[] = []
+    
+    function collectFolderIds(folders: TreeFolder[]) {
+      for (const folder of folders) {
+        folderIds.push(folder.id)
+        if (folder.children && folder.children.length > 0) {
+          collectFolderIds(folder.children)
+        }
+      }
+    }
+    
+    drives.forEach(drive => collectFolderIds(drive.folders))
+    
+    if (folderIds.length === 0) return
+    
+    try {
+      setStatus('🔢 กำลังนับจำนวนรูปในแต่ละโฟลเดอร์...')
+      const res = await fetch('/api/drive/count-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderIds }),
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setImageCounts(data.counts || {})
+      }
+    } catch (error) {
+      console.error('Error counting images:', error)
     }
   }
 
@@ -518,6 +603,14 @@ export default function CustomPromptPage() {
               <p className="text-gray-600">
                 เลือกรูปจาก Drive หรืออัพโหลดจากเครื่อง + เขียน Prompt + Template (ไม่บังคับ)
               </p>
+              {isLoadingFolders && (
+                <div className="mt-3 flex items-center gap-2 text-blue-600 bg-blue-50 px-4 py-2 rounded-lg">
+                  <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                  <span className="text-sm font-semibold">
+                    กำลังโหลดข้อมูลจากไดร์ฟ... {loadingTimer.toFixed(1)}s
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button
@@ -528,12 +621,15 @@ export default function CustomPromptPage() {
                 <span>เลือก Drives</span>
               </button>
               <button
-                onClick={syncDrives}
-                disabled={syncing}
+                onClick={async () => {
+                  await syncDrives()
+                  await fetchDriveFolders()
+                }}
+                disabled={syncing || isLoadingFolders}
                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
               >
                 <span>{syncing ? '⏳' : '🔄'}</span>
-                <span>{syncing ? 'Syncing...' : 'Sync'}</span>
+                <span>{syncing ? 'Syncing...' : 'อัพเดทรายการ'}</span>
               </button>
             </div>
           </div>
@@ -636,6 +732,7 @@ export default function CustomPromptPage() {
                     folders={drive.folders}
                     onSelectFolder={setSelectedFolderId}
                     selectedFolderId={selectedFolderId}
+                    imageCounts={imageCounts}
                   />
                 </div>
               ))}
