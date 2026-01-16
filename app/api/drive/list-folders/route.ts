@@ -78,8 +78,9 @@ export async function GET() {
     return NextResponse.json({ drives: driveData })
   } catch (error) {
     console.error('Error listing folders:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
-      { error: 'Failed to list folders' },
+      { error: 'Failed to list folders', details: errorMessage },
       { status: 500 }
     )
   }
@@ -89,20 +90,41 @@ type FolderStructure = { id: string; name: string; children: FolderStructure[] }
 
 async function getFolderStructure(drive: drive_v3.Drive, driveId: string, parentId?: string): Promise<FolderStructure[]> {
   try {
-    const query = parentId
-      ? `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-      : `mimeType='application/vnd.google-apps.folder' and trashed=false`
+    // Check if this is a Shared Drive or a regular folder
+    const isSharedDrive = driveId !== 'my-drive' && !driveId.startsWith('1')
+    
+    let query: string
+    let listOptions: drive_v3.Params$Resource$Files$List
+    
+    if (isSharedDrive) {
+      // Shared Drive: use driveId and corpora
+      query = parentId
+        ? `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+        : `mimeType='application/vnd.google-apps.folder' and trashed=false`
+      
+      listOptions = {
+        corpora: 'drive',
+        driveId: driveId,
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
+        q: query,
+        fields: 'files(id, name)',
+        pageSize: 100,
+      }
+    } else {
+      // Regular folder: use parent folder as starting point
+      const folderId = parentId || driveId
+      query = `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+      
+      listOptions = {
+        q: query,
+        fields: 'files(id, name)',
+        pageSize: 100,
+        supportsAllDrives: true,
+      }
+    }
 
-    const response = await drive.files.list({
-      corpora: 'drive',
-      driveId: driveId,
-      includeItemsFromAllDrives: true,
-      supportsAllDrives: true,
-      q: query,
-      fields: 'files(id, name)',
-      pageSize: 100,
-    })
-
+    const response = await drive.files.list(listOptions)
     const folders = response.data.files || []
     
     const result = []
@@ -117,7 +139,7 @@ async function getFolderStructure(drive: drive_v3.Drive, driveId: string, parent
 
     return result
   } catch (error) {
-    console.error('Error getting folder structure:', error)
+    console.error(`Error getting folder structure for ${driveId}:`, error)
     return []
   }
 }
