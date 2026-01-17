@@ -313,7 +313,38 @@ export default function GptImagePage() {
       
       // Add Drive images
       if (selectedDriveImages.length > 0) {
-        imageUrls = [...imageUrls, ...selectedDriveImages.map(img => img.url)]
+        setUploading(true)
+        console.log(`Converting ${selectedDriveImages.length} Drive images to Cloudinary URLs...`)
+        
+        // Convert Drive URLs to Cloudinary URLs (one by one)
+        const cloudinaryUrls: string[] = []
+        for (const driveImg of selectedDriveImages) {
+          try {
+            const response = await fetch('/api/drive/download-and-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fileId: driveImg.id,
+                fileName: driveImg.name,
+              }),
+            })
+
+            if (!response.ok) {
+              console.error(`Failed to convert Drive image: ${driveImg.name}`)
+              continue
+            }
+
+            const data = await response.json()
+            cloudinaryUrls.push(data.url)
+            console.log(`✓ Converted: ${driveImg.name}`)
+          } catch (err) {
+            console.error(`Error converting ${driveImg.name}:`, err)
+          }
+        }
+        
+        imageUrls = [...imageUrls, ...cloudinaryUrls]
+        setUploading(false)
+        console.log(`✅ Converted ${cloudinaryUrls.length}/${selectedDriveImages.length} Drive images`)
       }
 
       // Create job in database
