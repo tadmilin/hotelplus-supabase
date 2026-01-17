@@ -10,9 +10,24 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const { jobId, prompt, templateUrl, aspectRatio, numberOfImages, quality, outputFormat, background, moderation, inputFidelity, outputCompression, inputImages } = body
   
+  // Validate required parameters
+  if (!jobId || !prompt) {
+    return NextResponse.json(
+      { error: 'Missing required parameters: jobId and prompt' },
+      { status: 400 }
+    )
+  }
+
+  if (!templateUrl) {
+    return NextResponse.json(
+      { error: 'Template URL is required for template mode' },
+      { status: 400 }
+    )
+  }
+  
   try {
 
-    console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages, inputImageCount: inputImages?.length || 0 })
+    console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages, inputImageCount: inputImages?.length || 0, templateUrl })
 
     // ======= STEP 1: GPT Image 1.5 (สร้างรูปทีละรูป) =======
     console.log('📸 Step 1: Running GPT Image 1.5...')

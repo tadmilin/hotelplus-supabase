@@ -43,6 +43,7 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
     const result = await cloudinary.uploader.upload(base64Data, {
       folder,
       resource_type: 'image',
+      format: 'jpg', // บังคับแปลงเป็น JPEG (รองรับทุก format รวม HEIC)
       // Resize to max 1024px to fit in GPU memory (for Replicate)
       transformation: [
         { width: 1024, height: 1024, crop: "limit" }

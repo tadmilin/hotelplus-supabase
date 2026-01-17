@@ -37,10 +37,11 @@ export async function POST(req: NextRequest) {
     
     // ถ้าเป็น HEIC → อัพโหลดตรงไป Cloudinary (ข้าม Sharp)
     if (isHeic) {
-      console.log(`⚠️ HEIC detected: Uploading directly to Cloudinary`)
+      console.log(`⚠️ HEIC detected: Uploading directly to Cloudinary (will convert to JPEG)`)
       const base64String = buffer.toString('base64')
-      const cloudinaryUrl = await uploadBase64ToCloudinary(`data:image/heic;base64,${base64String}`, 'hotelplus-v2')
-      console.log(`✅ HEIC uploaded: ${originalSizeMB}MB`)
+      // ไม่ระบุ mime type เพราะ Cloudinary จะแปลงเป็น JPEG อัตโนมัติ (format: 'jpg')
+      const cloudinaryUrl = await uploadBase64ToCloudinary(`data:application/octet-stream;base64,${base64String}`, 'hotelplus-v2')
+      console.log(`✅ HEIC uploaded and converted to JPEG: ${originalSizeMB}MB`)
       return NextResponse.json({ url: cloudinaryUrl })
     }
     
