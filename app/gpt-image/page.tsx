@@ -48,6 +48,12 @@ export default function GptImagePage() {
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
 
+  // Template Mode state (NEW - for GPT Image with Template)
+  const [useTemplateMode, setUseTemplateMode] = useState(false)
+  const [templateImage, setTemplateImage] = useState<DriveImage | null>(null)
+  const [templateFolderId, setTemplateFolderId] = useState('')
+  const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
+
   useEffect(() => {
     async function checkAuth() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -248,6 +254,31 @@ export default function GptImagePage() {
     })
   }
 
+  async function loadTemplateImages() {
+    if (!templateFolderId) {
+      setError('กรุณาเลือกโฟลเดอร์ Template ก่อน')
+      return
+    }
+
+    try {
+      const res = await fetch('/api/drive/list-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: templateFolderId }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setTemplateImages(data.images || [])
+      } else {
+        setError('Failed to load templates')
+      }
+    } catch (error) {
+      console.error('Error loading templates:', error)
+      setError('Error loading templates')
+    }
+  }
+
   async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (files && files.length > 0) {
@@ -301,6 +332,91 @@ export default function GptImagePage() {
       return
     }
 
+    // ======= TEMPLATE MODE BRANCH =======
+    // Completely separate logic for template mode using Nano Banana Pro
+    if (useTemplateMode && templateImage) {
+      setCreating(true)
+      setError('')
+
+      try {
+        // Convert template image to Cloudinary if it's from Drive
+        let templateUrl = templateImage.url
+        if (templateImage.url.includes('drive.google.com')) {
+          const response = await fetch('/api/drive/download-and-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileId: templateImage.id,
+              fileName: templateImage.name,
+            }),
+          })
+
+          if (!response.ok) {
+            throw new Error('ไม่สามารถแปลง Template URL ได้')
+          }
+
+          const data = await response.json()
+          templateUrl = data.url
+        }
+
+        // Create job with template mode job_type
+        const { data: job, error: jobError } = await supabase
+          .from('jobs')
+          .insert({
+            user_id: user.id,
+            user_name: user.user_metadata?.name || null,
+            user_email: user.email,
+            job_type: 'gpt-image-with-template',
+            status: 'processing',
+            prompt: prompt,
+            template_url: templateUrl,
+            number_of_images: numImages,
+            output_urls: [],
+          })
+          .select()
+          .single()
+
+        if (jobError) throw jobError
+
+        // Call custom-prompt API (Nano Banana Pro model)
+        const response = await fetch('/api/replicate/custom-prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId: job.id,
+            prompt: prompt,
+            templateUrl: templateUrl,
+            numberOfImages: numImages,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to create images with template')
+        }
+
+        const result = await response.json()
+
+        // Update job with replicate_id
+        await supabase
+          .from('jobs')
+          .update({ replicate_id: result.id })
+          .eq('id', job.id)
+
+        // Redirect to dashboard
+        router.push('/dashboard')
+        return // Exit early - template mode complete
+      } catch (err: unknown) {
+        console.error('Template mode error:', err)
+        const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสร้างรูปด้วย Template'
+        setError(errorMessage)
+        setCreating(false)
+        return
+      }
+    }
+    // ======= END TEMPLATE MODE BRANCH =======
+
+    // ======= NORMAL MODE (GPT Image 1.5) =======
     setCreating(true)
     setError('')
 
@@ -532,6 +648,212 @@ export default function GptImagePage() {
               💡 เคล็ดลับ: ใช้เครื่องหมาย &quot;...&quot; สำหรับข้อความที่ต้องการให้แสดงในรูป ({prompt.length} ตัวอักษร)
             </p>
           </div>
+
+          {/* ======= TEMPLATE MODE SECTION ======= */}
+          <div className="bg-gradient-to-r from-orange-50 to-pink-50 rounded-xl p-6 border-2 border-orange-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">🎨 Template Mode (Nano Banana Pro)</h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useTemplateMode}
+                  onChange={(e) => {
+                    setUseTemplateMode(e.target.checked)
+                    if (!e.target.checked) {
+                      setTemplateImage(null)
+                      setTemplateFolderId('')
+                      setTemplateImages([])
+                    }
+                  }}
+                  className="w-5 h-5 text-orange-500 rounded focus:ring-2 focus:ring-orange-500"
+                  disabled={creating}
+                />
+                <span className="text-sm font-semibold text-gray-700">เปิดใช้งาน</span>
+              </label>
+            </div>
+
+            {useTemplateMode && (
+              <>
+                <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm text-yellow-700">
+                        <strong>หมายเหตุ:</strong> Template Mode จะใช้ Nano Banana Pro model แทน GPT Image 1.5 
+                        เพื่อให้สามารถยึดติดกับ Template ได้ดีขึ้น (การตั้งค่าอื่นๆ จะไม่มีผล)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Template Selection */}
+                <div className="space-y-4">
+                  {/* Template from Drive */}
+                  {driveFolders.length > 0 && (
+                    <div className="bg-white rounded-lg p-4">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-3">📂 เลือก Template จาก Drive</h4>
+                      
+                      {/* Folder Selector */}
+                      <select
+                        value={templateFolderId}
+                        onChange={(e) => {
+                          setTemplateFolderId(e.target.value)
+                          setTemplateImages([])
+                          setTemplateImage(null)
+                        }}
+                        className="w-full border-2 border-gray-300 rounded-lg px-4 py-2 mb-3 focus:ring-2 focus:ring-orange-500"
+                        disabled={creating}
+                      >
+                        <option value="">-- เลือกโฟลเดอร์ Template --</option>
+                        {driveFolders.flatMap(drive => 
+                          drive.folders.map(folder => (
+                            <option key={folder.id} value={folder.id}>
+                              📁 {drive.driveName} / {folder.name}
+                            </option>
+                          ))
+                        )}
+                      </select>
+
+                      {templateFolderId && (
+                        <button
+                          onClick={loadTemplateImages}
+                          disabled={loadingImages}
+                          className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:bg-gray-300"
+                        >
+                          {loadingImages ? 'กำลังโหลด...' : 'โหลด Templates'}
+                        </button>
+                      )}
+
+                      {/* Template Grid */}
+                      {templateImages.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-sm text-gray-600 mb-2">เลือก Template 1 รูป:</p>
+                          <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                            {templateImages.map((img) => (
+                              <div
+                                key={img.id}
+                                onClick={() => setTemplateImage(img)}
+                                className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                                  templateImage?.id === img.id
+                                    ? 'border-orange-500 ring-2 ring-orange-300'
+                                    : 'border-gray-200 hover:border-orange-300'
+                                }`}
+                              >
+                                <img
+                                  src={img.thumbnailUrl}
+                                  alt={img.name}
+                                  className="w-full h-24 object-cover"
+                                />
+                                <div className="p-1 bg-white">
+                                  <p className="text-xs text-gray-600 truncate">{img.name}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Template Upload */}
+                  <div className="bg-white rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">📤 อัพโหลด Template</h4>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+
+                        try {
+                          setUploading(true)
+                          
+                          // Client-side compression for large files
+                          let fileToUpload = file
+                          if (file.size > 3 * 1024 * 1024) { // > 3MB
+                            console.log(`Compressing template: ${(file.size / (1024 * 1024)).toFixed(2)}MB`)
+                            const imageCompression = (await import('browser-image-compression')).default
+                            fileToUpload = await imageCompression(file, {
+                              maxSizeMB: 3,
+                              maxWidthOrHeight: 2048,
+                              useWebWorker: true,
+                            })
+                            console.log(`✓ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
+                          }
+
+                          const formData = new FormData()
+                          formData.append('files', fileToUpload)
+
+                          const response = await fetch('/api/upload-images', {
+                            method: 'POST',
+                            body: formData,
+                          })
+
+                          if (!response.ok) throw new Error('อัพโหลดไม่สำเร็จ')
+
+                          const data = await response.json()
+                          const uploadedUrl = data.images[0]?.url
+
+                          if (uploadedUrl) {
+                            setTemplateImage({
+                              id: `uploaded-${Date.now()}`,
+                              name: file.name,
+                              thumbnailUrl: uploadedUrl,
+                              url: uploadedUrl,
+                            })
+                            setError('')
+                          }
+                        } catch (err) {
+                          console.error('Template upload error:', err)
+                          setError('ไม่สามารถอัพโหลด Template ได้')
+                        } finally {
+                          setUploading(false)
+                          e.target.value = ''
+                        }
+                      }}
+                      className="w-full border-2 border-dashed border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      disabled={creating || uploading}
+                    />
+                    {uploading && (
+                      <p className="text-sm text-orange-600 mt-2">🔄 กำลังอัพโหลด...</p>
+                    )}
+                  </div>
+
+                  {/* Selected Template Display */}
+                  {templateImage && (
+                    <div className="bg-white rounded-lg p-4 border-2 border-orange-300">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700">✅ Template ที่เลือก:</h4>
+                        <button
+                          onClick={() => setTemplateImage(null)}
+                          className="text-red-500 hover:text-red-700 font-semibold text-sm"
+                          disabled={creating}
+                        >
+                          🗑️ ลบ
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={templateImage.thumbnailUrl}
+                          alt={templateImage.name}
+                          className="w-20 h-20 object-cover rounded-lg border-2 border-orange-300"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{templateImage.name}</p>
+                          <p className="text-xs text-gray-500 mt-1">ระบบจะใช้ Template นี้ในการสร้างรูป</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          {/* ======= END TEMPLATE MODE SECTION ======= */}
 
           {/* Google Drive Images */}
           {driveFolders.length > 0 && (
