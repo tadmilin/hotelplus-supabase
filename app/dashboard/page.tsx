@@ -25,7 +25,6 @@ interface Job {
   completed_at: string | null
   progress?: number  // 0-100
   _originalCount?: number  // จำนวนรูปต้นฉบับก่อนรวม upscale
-  gpt_output_count?: number | null  // จำนวนรูปจาก GPT (สำหรับ gpt-with-template)
 }
 
 export default function DashboardPage() {
@@ -650,95 +649,7 @@ export default function DashboardPage() {
 
               {/* Output Images Grid */}
               <div>
-                {/* GPT + Template Mode */}
-                {selectedJob.job_type === 'gpt-with-template' && selectedJob.gpt_output_count && selectedJob.gpt_output_count > 0 ? (
-                  <>
-                    {/* GPT Images */}
-                    <div className="mb-8">
-                      <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                        🎨 รูปจาก GPT Image 1.5 ({selectedJob.gpt_output_count} รูป)
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        {selectedJob.output_urls?.slice(0, selectedJob.gpt_output_count).map((url, index) => (
-                          url ? (
-                            <div
-                              key={index}
-                              className="aspect-square relative rounded-lg overflow-hidden border-2 border-blue-200 hover:border-blue-400 transition-colors group"
-                            >
-                              <Image
-                                src={url.includes('cloudinary.com') 
-                                  ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
-                                  : url}
-                                alt={`GPT ${index + 1}`}
-                                fill
-                                className="object-cover"
-                                loading="lazy"
-                                unoptimized
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="absolute top-2 right-2 bg-white/90 hover:bg-white text-blue-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                              </a>
-                            </div>
-                          ) : null
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Template Results */}
-                    {selectedJob.output_urls?.length > selectedJob.gpt_output_count && (
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                          🤖 รูปหลัง Apply Template ({selectedJob.output_urls.length - selectedJob.gpt_output_count} รูป)
-                          <span className="ml-2 text-sm text-purple-600">
-                            (ผ่าน Nano Banana Pro)
-                          </span>
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                          {selectedJob.output_urls?.slice(selectedJob.gpt_output_count).map((url, index) => (
-                            url ? (
-                              <div
-                                key={index}
-                                className="aspect-square relative rounded-lg overflow-hidden border-2 border-purple-200 hover:border-purple-400 transition-colors group"
-                              >
-                                <Image
-                                  src={url.includes('cloudinary.com') 
-                                    ? url.replace('/upload/', '/upload/f_auto,q_70,w_1200,c_limit,fl_progressive/') 
-                                    : url}
-                                  alt={`Template ${index + 1}`}
-                                  fill
-                                  className="object-cover"
-                                  loading="lazy"
-                                  unoptimized
-                                />
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="absolute top-2 right-2 bg-white/90 hover:bg-white text-purple-600 rounded-full p-2 shadow-lg transition-all opacity-0 group-hover:opacity-100"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                  </svg>
-                                </a>
-                              </div>
-                            ) : null
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : selectedJob._originalCount && selectedJob._originalCount > 0 ? (
+                {selectedJob._originalCount && selectedJob._originalCount > 0 ? (
                   <>
                     {/* Original Images */}
                     <div className="mb-8">
