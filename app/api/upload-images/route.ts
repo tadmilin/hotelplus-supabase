@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v2 as cloudinary } from 'cloudinary'
+import sharp from 'sharp'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -24,9 +25,29 @@ export async function POST(req: NextRequest) {
 
     for (const file of files) {
       const bytes = await file.arrayBuffer()
-      const buffer = Buffer.from(bytes)
+      let buffer = Buffer.from(bytes)
+      const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+      
+      console.log(`📤 Uploading: ${file.name} (${originalSizeMB}MB)`)
+      
+      // If file is larger than 8MB, compress it with sharp
+      if (buffer.length > 8 * 1024 * 1024) {
+        console.log(`🔄 Compressing large file: ${file.name}`)
+        
+        // Resize and compress to ensure it's under 10MB
+        const compressedBuffer = await sharp(buffer)
+          .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer()
+        
+        buffer = Buffer.from(compressedBuffer)
+        
+        const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+        console.log(`✅ Compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
+      }
+      
       const base64 = buffer.toString('base64')
-      const dataUri = `data:${file.type};base64,${base64}`
+      const dataUri = `data:image/jpeg;base64,${base64}`
 
       const result = await cloudinary.uploader.upload(dataUri, {
         folder: 'hotelplus-v2',
