@@ -48,6 +48,11 @@ export default function GptImagePage() {
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
 
+  // Template Mode (GPT → Nano Banana Pro Pipeline)
+  const [useTemplate, setUseTemplate] = useState(false)
+  const [templateFile, setTemplateFile] = useState<File | null>(null)
+  const [templatePreview, setTemplatePreview] = useState<string | null>(null)
+
   useEffect(() => {
     async function checkAuth() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -379,48 +384,90 @@ export default function GptImagePage() {
       }
 
       // Create job in database
+      const jobType = useTemplate ? 'gpt-with-template' : 'gpt-image'
+      const jobData: Record<string, unknown> = {
+        user_id: user.id,
+        user_name: user.user_metadata?.name || null,
+        user_email: user.email,
+        job_type: jobType,
+        status: 'processing',
+        prompt: prompt,
+        aspect_ratio: aspectRatio,
+        quality: quality,
+        output_format: outputFormat,
+        background: background,
+        moderation: moderation,
+        input_fidelity: inputFidelity,
+        output_compression: outputCompression,
+        number_of_images: numImages,
+        image_urls: imageUrls,
+        output_urls: [],
+      }
+
+      // Upload template if template mode is enabled
+      if (useTemplate && templateFile) {
+        setUploading(true)
+        console.log('📤 Uploading template file...')
+        
+        const formData = new FormData()
+        formData.append('files', templateFile)
+
+        const templateUpload = await fetch('/api/upload-images', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!templateUpload.ok) {
+          throw new Error('ไม่สามารถอัพโหลด Template ได้')
+        }
+
+        const templateData = await templateUpload.json()
+        const templateUrl = templateData.images[0]?.url
+        
+        if (!templateUrl) {
+          throw new Error('ไม่พบ URL ของ Template')
+        }
+
+        jobData.template_url = templateUrl
+        setUploading(false)
+        console.log('✅ Template uploaded:', templateUrl)
+      }
+
       const { data: job, error: jobError } = await supabase
         .from('jobs')
-        .insert({
-          user_id: user.id,
-          user_name: user.user_metadata?.name || null,
-          user_email: user.email,
-          job_type: 'gpt-image',
-          status: 'processing',
-          prompt: prompt,
-          aspect_ratio: aspectRatio,
-          quality: quality,
-          output_format: outputFormat,
-          background: background,
-          moderation: moderation,
-          input_fidelity: inputFidelity,
-          output_compression: outputCompression,
-          number_of_images: numImages,
-          image_urls: imageUrls,
-          output_urls: [],
-        })
+        .insert(jobData)
         .select()
         .single()
 
       if (jobError) throw jobError
 
+      // Call appropriate API based on mode
+      const apiEndpoint = useTemplate ? '/api/replicate/gpt-with-template' : '/api/replicate/gpt-image'
+      
+      const apiBody: Record<string, unknown> = {
+        jobId: job.id,
+        prompt: prompt,
+        aspectRatio: aspectRatio,
+        numberOfImages: numImages,
+        quality: quality,
+        outputFormat: outputFormat,
+        background: background,
+        moderation: moderation,
+        inputFidelity: inputFidelity,
+        outputCompression: outputCompression,
+        inputImages: imageUrls,
+      }
+
+      // Add template URL for template mode
+      if (useTemplate && jobData.template_url) {
+        apiBody.templateUrl = jobData.template_url
+      }
+
       // Call Replicate API
-      const response = await fetch('/api/replicate/gpt-image', {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          prompt: prompt,
-          aspectRatio: aspectRatio,
-          numberOfImages: numImages,
-          quality: quality,
-          outputFormat: outputFormat,
-          background: background,
-          moderation: moderation,
-          inputFidelity: inputFidelity,
-          outputCompression: outputCompression,
-          inputImages: imageUrls,
-        }),
+        body: JSON.stringify(apiBody),
       })
 
       if (!response.ok) {
@@ -430,11 +477,13 @@ export default function GptImagePage() {
 
       const result = await response.json()
 
-      // Update job with replicate_id
-      await supabase
-        .from('jobs')
-        .update({ replicate_id: result.id })
-        .eq('id', job.id)
+      // Update job with replicate_id (for non-pipeline mode)
+      if (!useTemplate && result.id) {
+        await supabase
+          .from('jobs')
+          .update({ replicate_id: result.id })
+          .eq('id', job.id)
+      }
 
       // Redirect to dashboard
       router.push('/dashboard')
@@ -531,6 +580,136 @@ export default function GptImagePage() {
             <p className="text-xs text-gray-500 mt-2">
               💡 เคล็ดลับ: ใช้เครื่องหมาย &quot;...&quot; สำหรับข้อความที่ต้องการให้แสดงในรูป ({prompt.length} ตัวอักษร)
             </p>
+          </div>
+
+          {/* Template Mode */}
+          <div className="bg-gradient-to-r from-orange-50 to-pink-50 rounded-xl p-6 border-2 border-orange-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">🎨 โหมดเทมเพลต (ปรับปรุงคุณภาพ)</h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useTemplate}
+                  onChange={(e) => {
+                    setUseTemplate(e.target.checked)
+                    if (!e.target.checked) {
+                      setTemplateFile(null)
+                      setTemplatePreview(null)
+                    }
+                  }}
+                  className="w-5 h-5 text-orange-500 rounded focus:ring-2 focus:ring-orange-500"
+                  disabled={creating}
+                />
+                <span className="text-sm font-semibold text-gray-700">เปิดใช้งาน</span>
+              </label>
+            </div>
+
+            {useTemplate && (
+              <>
+                <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm text-blue-700">
+                        <strong>Pipeline 3 ขั้นตอน:</strong> GPT Image สร้างรูปคุณภาพสูง → ใส่เทมเพลต → อัพสเกล (เพิ่มความคมชัด)
+                      </p>
+                      <p className="text-xs text-blue-600 mt-1">
+                        ⏱️ ใช้เวลานานขึ้น | 💰 ราคาสูงขึ้น 2-3 เท่า | ⭐ คุณภาพสูงสุด
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Template Upload */}
+                <div className="bg-white rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">📤 อัพโหลดเทมเพลต (ตัวอย่างที่ต้องการ)</h4>
+                  
+                  {!templateFile ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+
+                          try {
+                            // Client-side compression for large files
+                            let fileToUpload = file
+                            if (file.size > 3 * 1024 * 1024) {
+                              console.log(`Compressing template: ${(file.size / (1024 * 1024)).toFixed(2)}MB`)
+                              fileToUpload = await imageCompression(file, {
+                                maxSizeMB: 3,
+                                maxWidthOrHeight: 2048,
+                                useWebWorker: true,
+                              })
+                              console.log(`✓ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
+                            }
+
+                            setTemplateFile(fileToUpload)
+                            
+                            // Create preview
+                            const reader = new FileReader()
+                            reader.onloadend = () => {
+                              setTemplatePreview(reader.result as string)
+                            }
+                            reader.readAsDataURL(fileToUpload)
+                            setError('')
+                          } catch (err) {
+                            console.error('Template error:', err)
+                            setError('ไม่สามารถโหลดเทมเพลตได้')
+                          }
+                          e.target.value = ''
+                        }}
+                        className="w-full border-2 border-dashed border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        disabled={creating || uploading}
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        รองรับ: JPG, PNG, WebP (ขนาดไม่เกิน 10MB)
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-orange-300 rounded-lg p-4 bg-orange-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-semibold text-gray-700">✅ เทมเพลตที่เลือก:</h5>
+                        <button
+                          onClick={() => {
+                            setTemplateFile(null)
+                            setTemplatePreview(null)
+                          }}
+                          className="text-red-500 hover:text-red-700 font-semibold text-sm"
+                          disabled={creating}
+                        >
+                          🗑️ ลบ
+                        </button>
+                      </div>
+                      {templatePreview && (
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={templatePreview}
+                            alt="Template preview"
+                            className="w-24 h-24 object-cover rounded-lg border-2 border-orange-300"
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{templateFile.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {(templateFile.size / (1024 * 1024)).toFixed(2)} MB
+                            </p>
+                            <p className="text-xs text-orange-600 mt-1">
+                              ระบบจะใช้เทมเพลตนี้ในการจัด layout
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Google Drive Images */}
