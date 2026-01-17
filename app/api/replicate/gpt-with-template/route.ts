@@ -12,34 +12,68 @@ export async function POST(request: NextRequest) {
   
   try {
 
-    console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages })
+    console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages, inputImageCount: inputImages?.length || 0 })
 
-    // ======= STEP 1: GPT Image 1.5 =======
+    // ======= STEP 1: GPT Image 1.5 (สร้างรูปทีละรูป) =======
     console.log('📸 Step 1: Running GPT Image 1.5...')
-    const gptInput: Record<string, unknown> = {
-      prompt: prompt,
-      aspect_ratio: aspectRatio || '1:1',
-      number_of_images: numberOfImages || 1,
-      quality: quality || 'auto',
-      output_format: outputFormat || 'webp',
-      background: background || 'auto',
-      moderation: moderation || 'auto',
-      input_fidelity: inputFidelity || 'low',
-      output_compression: outputCompression || 90,
-    }
+    const gptOutput: string[] = []
 
+    // ถ้ามี input images หลายรูป -> สร้างแยกรูปทีละรูป เพื่อไม่ให้เป็น collage
     if (inputImages && inputImages.length > 0) {
-      gptInput.input_images = inputImages
+      console.log(`🔄 Processing ${inputImages.length} input images separately...`)
+      
+      for (let i = 0; i < inputImages.length; i++) {
+        console.log(`  📷 Image ${i + 1}/${inputImages.length}...`)
+        
+        const singleInput: Record<string, unknown> = {
+          prompt: prompt,
+          aspect_ratio: aspectRatio || '1:1',
+          number_of_images: 1, // สร้างรูปเดียวต่อ input
+          quality: quality || 'auto',
+          output_format: outputFormat || 'webp',
+          background: background || 'auto',
+          moderation: moderation || 'auto',
+          input_fidelity: inputFidelity || 'low',
+          output_compression: outputCompression || 90,
+          input_images: [inputImages[i]], // ส่งทีละรูป
+        }
+
+        const gptPrediction = await replicate.predictions.create({
+          model: 'openai/gpt-image-1.5',
+          input: singleInput,
+        })
+
+        const gptResult = await replicate.wait(gptPrediction)
+        const output = gptResult.output as string[]
+        
+        if (output && output.length > 0) {
+          gptOutput.push(...output)
+          console.log(`  ✅ Image ${i + 1} completed`)
+        }
+      }
+    } else {
+      // ไม่มี input images -> สร้างตาม numberOfImages ปกติ
+      const gptInput: Record<string, unknown> = {
+        prompt: prompt,
+        aspect_ratio: aspectRatio || '1:1',
+        number_of_images: numberOfImages || 1,
+        quality: quality || 'auto',
+        output_format: outputFormat || 'webp',
+        background: background || 'auto',
+        moderation: moderation || 'auto',
+        input_fidelity: inputFidelity || 'low',
+        output_compression: outputCompression || 90,
+      }
+
+      const gptPrediction = await replicate.predictions.create({
+        model: 'openai/gpt-image-1.5',
+        input: gptInput,
+      })
+
+      const gptResult = await replicate.wait(gptPrediction)
+      const output = gptResult.output as string[]
+      gptOutput.push(...output)
     }
-
-    const gptPrediction = await replicate.predictions.create({
-      model: 'openai/gpt-image-1.5',
-      input: gptInput,
-    })
-
-    // Wait for GPT Image to complete
-    const gptResult = await replicate.wait(gptPrediction)
-    const gptOutput = gptResult.output as string[]
 
     console.log('✅ GPT Image completed:', gptOutput.length, 'images')
 
@@ -53,47 +87,44 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', jobId)
 
-    // ======= STEP 2: Nano Banana Pro (Apply Template to All) =======
+    // ======= STEP 2: Nano Banana Pro (Apply Template - ยิงครั้งเดียว) =======
     console.log('🎨 Step 2: Applying template with Nano Banana Pro...')
+    console.log(`📋 Template: ${templateUrl}`)
+    console.log(`📸 Input images: ${gptOutput.length} images`)
     
     // Hardcoded prompt for template application
-    const templatePrompt = "รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ทั้งหมด (กราฟิค, กรอบ) ขั้นตอน: 1. ใช้ภาพแรก (รูปแรกหลัง Template)  เป็นภาพหลัก/Background/Hero Image ใหญ่สุด 2. ถ้ามีรูปเพิ่ม: ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม 3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับกรอบ)  สิ่งที่ห้ามแก้ไข: กรอบ,ตำแหน่ง Layout สิ่งที่สามารถแก้ได้: ภาพพื้นหลังและรูปเล็กทั้งหมด (ต้องเป็นภาพใหม่ที่แนบมา) สิ่งที่ต้องลบออก: ข้อความ(ตัวอักษรและตัวเลขทั้งหมด)และโลโก้"
+    const templatePrompt = "Apply the layout and composition from the template image while preserving the content and quality of the input image. Maintain all details, faces, and elements from the input image but arrange them according to the template structure."
 
-    const templateResults: string[] = []
-    
-    for (let i = 0; i < gptOutput.length; i++) {
-      console.log(`🔄 Processing image ${i + 1}/${gptOutput.length}...`)
-      
-      const nanoInput = {
-        prompt: templatePrompt,
-        image: gptOutput[i], // รูปจาก GPT Image
-        template_image: templateUrl, // Template reference
-        num_inference_steps: 50,
-        guidance_scale: 7.5,
-        num_outputs: 1,
-      }
-
-      try {
-        const nanoPrediction = await replicate.predictions.create({
-          model: 'google/nano-banana-pro',
-          input: nanoInput,
-        })
-
-        const nanoResult = await replicate.wait(nanoPrediction)
-        const nanoOutput = nanoResult.output as string[]
-
-        if (nanoOutput && nanoOutput.length > 0) {
-          templateResults.push(nanoOutput[0])
-          console.log(`✅ Template applied ${i + 1}/${gptOutput.length}`)
-        }
-      } catch (err) {
-        console.error(`❌ Template failed for image ${i + 1}:`, err)
-        // ถ้าล้มเหลว ใช้รูปจาก GPT แทน
-        templateResults.push(gptOutput[i])
-      }
+    const nanoInput = {
+      prompt: templatePrompt,
+      template_image: templateUrl, // รูปเทมเพลตที่แนบมา (กรอบ/layout)
+      input_images: gptOutput, // รูปทั้งหมดจาก GPT Image ที่จะใส่ในเทมเพลต
+      num_inference_steps: 50,
+      guidance_scale: 7.5,
+      num_outputs: 1, // ✅ Output 1 รูปเดียว (เทมเพลต + รูปทั้งหมดข้างใน)
     }
 
-    console.log('✅ All templates applied:', templateResults.length, 'images')
+    let templateResults: string[] = []
+
+    try {
+      console.log('🚀 Calling Nano Banana Pro (single API call)...')
+      
+      const nanoPrediction = await replicate.predictions.create({
+        model: 'google/nano-banana-pro',
+        input: nanoInput,
+      })
+
+      const nanoResult = await replicate.wait(nanoPrediction)
+      templateResults = nanoResult.output as string[]
+
+      console.log(`✅ Template applied successfully: ${templateResults.length} images`)
+    } catch (err) {
+      console.error('❌ Nano Banana Pro failed:', err)
+      console.log('⚠️ Fallback: Using GPT Image results without template')
+      templateResults = gptOutput // ใช้รูปจาก GPT แทน
+    }
+
+    console.log('✅ Pipeline completed:', templateResults.length, 'images')
 
     // Update job with template results
     await supabase
