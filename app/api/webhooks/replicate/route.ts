@@ -183,6 +183,7 @@ export async function POST(req: NextRequest) {
       console.log('✅ Job updated successfully')
 
       // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, etc.)
+      // Exclude gpt-with-template as it already processed through Nano Banana Pro
       const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image']
       if (nonUpscaleTypes.includes(job.job_type) && outputUrls.length > 0) {
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)

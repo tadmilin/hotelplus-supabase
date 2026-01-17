@@ -120,10 +120,17 @@ export async function POST(request: NextRequest) {
             resolution: '1K',
         }
 
-        let templateResults: string[] = []
+        // ======= Update job with GPT results first =======
+        await supabase
+            .from('jobs')
+            .update({
+                output_urls: gptOutput,
+                status: 'processing'
+            })
+            .eq('id', jobId)
 
         try {
-            console.log('🚀 Calling Nano Banana Pro (single API call)...')
+            console.log('🚀 Calling Nano Banana Pro with webhook...')
             console.log('📋 Nano Input:', {
                 imageCount: [templateUrl, ...gptOutput].length,
                 hasPrompt: !!templatePrompt
@@ -132,28 +139,34 @@ export async function POST(request: NextRequest) {
             const nanoPrediction = await replicate.predictions.create({
                 model: 'google/nano-banana-pro',
                 input: nanoInput,
+                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                webhook_events_filter: ['completed'],
             })
 
-            const nanoResult = await replicate.wait(nanoPrediction)
-            templateResults = nanoResult.output as string[]
+            // Update job with replicate_id for webhook tracking
+            await supabase
+                .from('jobs')
+                .update({
+                    replicate_id: nanoPrediction.id,
+                })
+                .eq('id', jobId)
 
-            console.log(`✅ Template applied successfully: ${templateResults.length} images`)
+            console.log(`✅ Nano Banana Pro started: ${nanoPrediction.id}`)
+            console.log('⏳ Webhook will handle the final output')
+
         } catch (err) {
             console.error('❌ Nano Banana Pro failed:', err)
-            console.log('⚠️ Fallback: Using GPT Image results without template')
-            templateResults = gptOutput // ใช้รูปจาก GPT แทน
+            console.log('⚠️ Fallback: Using GPT Image results')
+            
+            // Fallback: keep GPT results as final output
+            await supabase
+                .from('jobs')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', jobId)
         }
-
-        console.log('✅ Pipeline completed:', templateResults.length, 'images')
-
-        // Update job with template results (final output only)
-        await supabase
-            .from('jobs')
-            .update({
-                output_urls: templateResults,
-                status: 'completed'
-            })
-            .eq('id', jobId)
 
         // ======= STEP 3: Auto Upscale (Optional - Future) =======
         // TODO: Add auto upscale if enabled
@@ -162,8 +175,7 @@ export async function POST(request: NextRequest) {
             success: true,
             id: jobId,
             gptResults: gptOutput.length,
-            templateResults: templateResults.length,
-            output: templateResults
+            message: 'Pipeline started, webhook will complete'
         })
 
     } catch (error: unknown) {
