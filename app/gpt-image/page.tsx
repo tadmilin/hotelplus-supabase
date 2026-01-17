@@ -250,6 +250,11 @@ export default function GptImagePage() {
   async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (files && files.length > 0) {
+      // Check file sizes and show warning if too large
+      const largeFiles = Array.from(files).filter(file => file.size > 5 * 1024 * 1024) // > 5MB
+      if (largeFiles.length > 0) {
+        console.warn(`${largeFiles.length} files are larger than 5MB. May cause upload issues.`)
+      }
       setInputImages(Array.from(files))
     }
   }
@@ -275,6 +280,13 @@ export default function GptImagePage() {
       // Upload input images if any
       if (inputImages.length > 0) {
         setUploading(true)
+        
+        // Calculate total size
+        const totalSize = inputImages.reduce((sum, file) => sum + file.size, 0)
+        const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2)
+        
+        console.log(`Uploading ${inputImages.length} files, total size: ${totalSizeMB}MB`)
+        
         const formData = new FormData()
         inputImages.forEach((file) => {
           formData.append('files', file)
@@ -286,6 +298,11 @@ export default function GptImagePage() {
         })
 
         if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text()
+          console.error('Upload failed:', uploadResponse.status, errorText)
+          if (uploadResponse.status === 413) {
+            throw new Error(`ไฟล์ใหญ่เกินไป (${totalSizeMB}MB) - กรุณาลดขนาดไฟล์หรือเลือกรูปน้อยลง`)
+          }
           throw new Error('Failed to upload images')
         }
 

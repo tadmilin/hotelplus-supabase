@@ -59,8 +59,19 @@ export async function POST(req: NextRequest) {
 
     // Add input images if provided (must be array of URLs)
     if (inputImages && Array.isArray(inputImages) && inputImages.length > 0) {
-      input.input_images = inputImages
+      // Filter out any null, undefined, or empty strings
+      const validImages = inputImages.filter(url => url && typeof url === 'string' && url.trim() !== '')
+      if (validImages.length > 0) {
+        input.input_images = validImages
+        console.log('📸 Input images:', validImages.length)
+      }
     }
+
+    console.log('🚀 Sending to Replicate:', {
+      model,
+      hasInputImages: !!input.input_images,
+      inputKeys: Object.keys(input)
+    })
 
     const prediction = await replicate.predictions.create({
       model: model,
