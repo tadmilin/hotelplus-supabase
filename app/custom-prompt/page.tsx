@@ -1003,8 +1003,17 @@ export default function CustomPromptPage() {
                     )}
 
                     {selectedTemplate && (
-                      <div className="text-sm text-green-700 bg-green-50 p-2 rounded">
-                        ✅ เลือก Template แล้ว
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 text-sm text-green-700 bg-green-50 p-2 rounded">
+                          ✅ เลือก Template แล้ว
+                        </div>
+                        <button
+                          onClick={() => setSelectedTemplate('')}
+                          className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
+                          title="ยกเลิก Template"
+                        >
+                          🗑️ ลบ
+                        </button>
                       </div>
                     )}
                   </div>
