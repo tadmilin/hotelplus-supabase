@@ -901,14 +901,40 @@ export default function CustomPromptPage() {
                       <input
                         type="file"
                         id="template-upload"
-                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                        accept="image/*"
                         onChange={async (e) => {
                           const files = e.target.files
                           if (!files || files.length === 0) return
                           
                           setUploadingFiles(true)
+                          setStatus('📤 กำลังอัพโหลด Template...')
+                          
+                          const file = files[0]
+                          const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+                          
+                          // Compress if file is larger than 3MB
+                          let fileToUpload = file
+                          if (file.size > 3 * 1024 * 1024) {
+                            setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
+                            
+                            try {
+                              const options = {
+                                maxSizeMB: 3,
+                                maxWidthOrHeight: 2048,
+                                useWebWorker: true,
+                                fileType: 'image/jpeg' as const,
+                              }
+                              
+                              fileToUpload = await imageCompression(file, options)
+                              const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
+                              console.log(`✅ Template compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+                            } catch (err) {
+                              console.error('Failed to compress template:', err)
+                            }
+                          }
+                          
                           const formData = new FormData()
-                          formData.append('files', files[0])
+                          formData.append('files', fileToUpload)
 
                           const res = await fetch('/api/upload-images', {
                             method: 'POST',
@@ -922,7 +948,13 @@ export default function CustomPromptPage() {
                             setTemplateImages(prev => [uploadedTemplate, ...prev])
                             // Auto-select it
                             setSelectedTemplate(uploadedTemplate.url)
+                            setStatus('✅ อัพโหลด Template สำเร็จ')
+                            setTimeout(() => setStatus(''), 2000)
+                          } else {
+                            setStatus('❌ อัพโหลด Template ล้มเหลว')
+                            setTimeout(() => setStatus(''), 3000)
                           }
+                          
                           setUploadingFiles(false)
                           e.target.value = ''
                         }}
