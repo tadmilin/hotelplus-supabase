@@ -1008,7 +1008,10 @@ export default function CustomPromptPage() {
                           ✅ เลือก Template แล้ว
                         </div>
                         <button
-                          onClick={() => setSelectedTemplate('')}
+                          onClick={() => {
+                            setSelectedTemplate('')
+                            setEnableTemplate(false)
+                          }}
                           className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
                           title="ยกเลิก Template"
                         >
