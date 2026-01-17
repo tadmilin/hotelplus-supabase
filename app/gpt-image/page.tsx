@@ -461,27 +461,29 @@ export default function GptImagePage() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Folder Tree */}
-                <div className="bg-white rounded-lg p-4 max-h-96 overflow-y-auto">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3">โฟลเดอร์:</h4>
-                  {driveFolders.map((drive) => (
-                    <div key={drive.driveId} className="mb-4">
-                      <h5 className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-2">
-                        <span>📱</span>
-                        <span>{drive.driveName}</span>
-                      </h5>
-                      <FolderTree
-                        folders={drive.folders}
-                        onSelectFolder={setSelectedFolderId}
-                        selectedFolderId={selectedFolderId}
-                        imageCounts={imageCounts}
-                      />
-                    </div>
-                  ))}
+                <div>
+                  <div className="bg-white rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">โฟลเดอร์:</h4>
+                    {driveFolders.map((drive) => (
+                      <div key={drive.driveId} className="mb-4">
+                        <h5 className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-2">
+                          <span>📱</span>
+                          <span>{drive.driveName}</span>
+                        </h5>
+                        <FolderTree
+                          folders={drive.folders}
+                          onSelectFolder={setSelectedFolderId}
+                          selectedFolderId={selectedFolderId}
+                          imageCounts={imageCounts}
+                        />
+                      </div>
+                    ))}
+                  </div>
                   {selectedFolderId && (
                     <button
                       onClick={loadDriveImages}
                       disabled={loadingImages}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg font-semibold mt-4 disabled:opacity-50"
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg font-semibold mt-3 disabled:opacity-50"
                     >
                       {loadingImages ? '⏳ กำลังโหลด...' : '📥 โหลดรูปจากโฟลเดอร์นี้'}
                     </button>
@@ -531,10 +533,22 @@ export default function GptImagePage() {
               </div>
 
               {selectedDriveImages.length > 0 && (
-                <div className="mt-4 p-3 bg-green-100 rounded-lg">
-                  <p className="text-sm font-semibold text-green-800">
+                <div className="mt-4 p-4 bg-green-100 rounded-lg">
+                  <p className="text-sm font-semibold text-green-800 mb-3">
                     ✅ เลือกแล้ว {selectedDriveImages.length} รูปจาก Drive
                   </p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedDriveImages.map((img) => (
+                      <div key={img.id} className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img.thumbnailUrl}
+                          alt={img.name}
+                          className="w-20 h-20 object-cover rounded-lg border-2 border-green-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
