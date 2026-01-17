@@ -146,11 +146,17 @@ export async function POST(request: NextRequest) {
 
         console.log('✅ Pipeline completed:', templateResults.length, 'images')
 
-        // Update job with template results
+        // Update job with BOTH GPT results and template results
+        // ถ้า templateResults === gptOutput (fallback case) ก็ไม่ต้องรวม
+        const isFallback = templateResults === gptOutput
+        const allOutputs = isFallback ? gptOutput : [...gptOutput, ...templateResults]
+        const gptCount = isFallback ? null : gptOutput.length
+        
         await supabase
             .from('jobs')
             .update({
-                output_urls: templateResults,
+                output_urls: allOutputs,
+                gpt_output_count: gptCount,
                 status: 'completed'
             })
             .eq('id', jobId)
