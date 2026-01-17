@@ -28,22 +28,36 @@ export async function POST(req: NextRequest) {
       let buffer = Buffer.from(bytes)
       const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
       
-      console.log(`📤 Uploading: ${file.name} (${originalSizeMB}MB)`)
+      console.log(`📤 Uploading: ${file.name} (${originalSizeMB}MB, type: ${file.type})`)
       
-      // If file is larger than 8MB, compress it with sharp
-      if (buffer.length > 8 * 1024 * 1024) {
-        console.log(`🔄 Compressing large file: ${file.name}`)
+      // Always process through sharp to:
+      // 1. Convert HEIC/HEIF to JPEG (iOS compatibility)
+      // 2. Compress large files > 8MB
+      // 3. Ensure consistent JPEG output for Replicate
+      const needsProcessing = buffer.length > 8 * 1024 * 1024 || 
+                              file.type === 'image/heic' || 
+                              file.type === 'image/heif' ||
+                              file.name.toLowerCase().endsWith('.heic') ||
+                              file.name.toLowerCase().endsWith('.heif')
+      
+      if (needsProcessing) {
+        console.log(`🔄 Processing image: ${file.name}`)
         
-        // Resize and compress to ensure it's under 10MB
-        const compressedBuffer = await sharp(buffer)
-          .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer()
-        
-        buffer = Buffer.from(compressedBuffer)
-        
-        const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-        console.log(`✅ Compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
+        try {
+          // Convert to JPEG and optionally compress
+          const compressedBuffer = await sharp(buffer)
+            .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 85 })
+            .toBuffer()
+          
+          buffer = Buffer.from(compressedBuffer)
+          
+          const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+          console.log(`✅ Processed: ${originalSizeMB}MB → ${compressedSizeMB}MB (JPEG)`)
+        } catch (err) {
+          console.error(`❌ Failed to process ${file.name}:`, err)
+          throw new Error(`Failed to process image: ${file.name}`)
+        }
       }
       
       const base64 = buffer.toString('base64')

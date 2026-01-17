@@ -31,20 +31,31 @@ export async function POST(req: NextRequest) {
     
     console.log(`📥 Downloaded: ${fileName} (${originalSizeMB}MB)`)
     
-    // If file is larger than 8MB, compress it with sharp
-    if (buffer.length > 8 * 1024 * 1024) {
-      console.log(`🔄 Compressing large image: ${fileName}`)
+    // Always process through sharp to:
+    // 1. Convert HEIC/HEIF to JPEG (iOS compatibility)
+    // 2. Compress large files > 8MB
+    // 3. Ensure consistent JPEG output for Replicate
+    const isHeic = fileName.toLowerCase().endsWith('.heic') || fileName.toLowerCase().endsWith('.heif')
+    const needsProcessing = buffer.length > 8 * 1024 * 1024 || isHeic
+    
+    if (needsProcessing) {
+      console.log(`🔄 Processing image: ${fileName}${isHeic ? ' (HEIC → JPEG)' : ''}`)
       
-      // Resize and compress to ensure it's under 10MB
-      const compressedBuffer = await sharp(buffer)
-        .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer()
-      
-      buffer = Buffer.from(compressedBuffer)
-      
-      const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-      console.log(`✅ Compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
+      try {
+        // Convert to JPEG and optionally compress
+        const compressedBuffer = await sharp(buffer)
+          .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer()
+        
+        buffer = Buffer.from(compressedBuffer)
+        
+        const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+        console.log(`✅ Processed: ${originalSizeMB}MB → ${compressedSizeMB}MB (JPEG)`)
+      } catch (err) {
+        console.error(`❌ Failed to process ${fileName}:`, err)
+        throw new Error(`Failed to process image: ${fileName}`)
+      }
     }
     
     const base64String = `data:image/jpeg;base64,${buffer.toString('base64')}`
