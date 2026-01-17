@@ -7,8 +7,10 @@ const replicate = new Replicate({
 })
 
 export async function POST(request: NextRequest) {
+  const body = await request.json()
+  const { jobId, prompt, templateUrl, aspectRatio, numberOfImages, quality, outputFormat, background, moderation, inputFidelity, outputCompression, inputImages } = body
+  
   try {
-    const { jobId, prompt, templateUrl, aspectRatio, numberOfImages, quality, outputFormat, background, moderation, inputFidelity, outputCompression, inputImages } = await request.json()
 
     console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages })
 
@@ -16,24 +18,28 @@ export async function POST(request: NextRequest) {
     console.log('📸 Step 1: Running GPT Image 1.5...')
     const gptInput: Record<string, unknown> = {
       prompt: prompt,
-      aspect_ratio: aspectRatio,
-      num_outputs: numberOfImages,
-      quality: quality,
-      output_format: outputFormat,
-      background: background,
-      moderation: moderation,
-      input_fidelity: inputFidelity,
-      output_compression: outputCompression,
+      aspect_ratio: aspectRatio || '1:1',
+      number_of_images: numberOfImages || 1,
+      quality: quality || 'auto',
+      output_format: outputFormat || 'webp',
+      background: background || 'auto',
+      moderation: moderation || 'auto',
+      input_fidelity: inputFidelity || 'low',
+      output_compression: outputCompression || 90,
     }
 
     if (inputImages && inputImages.length > 0) {
       gptInput.input_images = inputImages
     }
 
-    const gptOutput = await replicate.run(
-      "openai/gpt-image-1.5:latest",
-      { input: gptInput }
-    ) as string[]
+    const gptPrediction = await replicate.predictions.create({
+      model: 'openai/gpt-image-1.5',
+      input: gptInput,
+    })
+
+    // Wait for GPT Image to complete
+    const gptResult = await replicate.wait(gptPrediction)
+    const gptOutput = gptResult.output as string[]
 
     console.log('✅ GPT Image completed:', gptOutput.length, 'images')
 
@@ -68,10 +74,13 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const nanoOutput = await replicate.run(
-          "google/nano-banana-pro:latest",
-          { input: nanoInput }
-        ) as string[]
+        const nanoPrediction = await replicate.predictions.create({
+          model: 'google/nano-banana-pro',
+          input: nanoInput,
+        })
+
+        const nanoResult = await replicate.wait(nanoPrediction)
+        const nanoOutput = nanoResult.output as string[]
 
         if (nanoOutput && nanoOutput.length > 0) {
           templateResults.push(nanoOutput[0])
@@ -111,9 +120,8 @@ export async function POST(request: NextRequest) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     
     // Update job status to failed
-    if (request.json) {
+    if (jobId) {
       try {
-        const body = await request.json()
         const supabase = await createClient()
         await supabase
           .from('jobs')
@@ -121,7 +129,7 @@ export async function POST(request: NextRequest) {
             status: 'failed',
             error: errorMessage
           })
-          .eq('id', body.jobId)
+          .eq('id', jobId)
       } catch (e) {
         console.error('Failed to update job status:', e)
       }
