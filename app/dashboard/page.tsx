@@ -410,6 +410,7 @@ export default function DashboardPage() {
                         {job.job_type === 'custom-prompt-template' && '🎨 Custom + Template'}
                         {job.job_type === 'custom-template' && '🖼️ Custom Template'}
                         {job.job_type === 'gpt-image' && '🎨 GPT Image 1.5'}
+                        {job.job_type === 'gpt-with-template' && '🤖 GPT + Template'}
                         {job.job_type === 'upscale' && '🔍 Upscale'}
                         {!job.job_type && '📋 Unknown'}
                       </span>
@@ -560,10 +561,13 @@ export default function DashboardPage() {
                   <div>
                     <div className="text-xs text-gray-600 mb-1">โหมด:</div>
                     <div className="font-semibold text-purple-900">
-                      {selectedJob.template_type === 'text-to-image' && '✨ Text to Image'}
-                      {selectedJob.template_type === 'custom-prompt' && '🎨 Custom Prompt'}
-                      {selectedJob.template_type === 'custom-prompt-template' && '🎨 Custom + Template'}
-                      {selectedJob.template_type === 'upscale' && '🔍 Upscale'}
+                      {selectedJob.job_type === 'text-to-image' && '✨ Text to Image'}
+                      {selectedJob.job_type === 'custom-prompt' && '🎨 Custom Prompt'}
+                      {selectedJob.job_type === 'custom-prompt-template' && '🎨 Custom + Template'}
+                      {selectedJob.job_type === 'custom-template' && '🖼️ Custom Template'}
+                      {selectedJob.job_type === 'gpt-image' && '🎨 GPT Image 1.5'}
+                      {selectedJob.job_type === 'gpt-with-template' && '🤖 GPT + Template'}
+                      {selectedJob.job_type === 'upscale' && '🔍 Upscale'}
                     </div>
                   </div>
                   <div>
