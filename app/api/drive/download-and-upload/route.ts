@@ -31,18 +31,26 @@ export async function POST(req: NextRequest) {
     
     console.log(`📥 Downloaded: ${fileName} (${originalSizeMB}MB)`)
     
-    // Always process through sharp to:
-    // 1. Convert HEIC/HEIF to JPEG (iOS compatibility)
-    // 2. Compress large files > 8MB
-    // 3. Ensure consistent JPEG output for Replicate
+    // ตรวจสอบประเภทไฟล์
     const isHeic = fileName.toLowerCase().endsWith('.heic') || fileName.toLowerCase().endsWith('.heif')
-    const needsProcessing = buffer.length > 8 * 1024 * 1024 || isHeic
+    const needsCompression = buffer.length > 8 * 1024 * 1024
     
-    if (needsProcessing) {
-      console.log(`🔄 Processing image: ${fileName}${isHeic ? ' (HEIC → JPEG)' : ''}`)
+    // ถ้าเป็น HEIC → อัพโหลดตรงไป Cloudinary (ข้าม Sharp)
+    if (isHeic) {
+      console.log(`⚠️ HEIC detected: Uploading directly to Cloudinary`)
+      const base64String = buffer.toString('base64')
+      const cloudinaryUrl = await uploadBase64ToCloudinary(`data:image/heic;base64,${base64String}`, 'hotelplus-v2')
+      console.log(`✅ HEIC uploaded: ${originalSizeMB}MB`)
+      return NextResponse.json({ url: cloudinaryUrl })
+    }
+    
+    // ไม่ใช่ HEIC → ประมวลผลด้วย Sharp (ถ้าใหญ่เกิน 8MB)
+    let mimeType = 'image/jpeg'
+    
+    if (needsCompression) {
+      console.log(`🔄 Compressing: ${fileName} (${originalSizeMB}MB > 8MB)`)
       
       try {
-        // Convert to JPEG and optionally compress
         const compressedBuffer = await sharp(buffer)
           .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 85 })
@@ -51,14 +59,22 @@ export async function POST(req: NextRequest) {
         buffer = Buffer.from(compressedBuffer)
         
         const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-        console.log(`✅ Processed: ${originalSizeMB}MB → ${compressedSizeMB}MB (JPEG)`)
+        console.log(`✅ Compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
       } catch (err) {
-        console.error(`❌ Failed to process ${fileName}:`, err)
-        throw new Error(`Failed to process image: ${fileName}`)
+        console.error(`❌ Compression failed for ${fileName}:`, err)
+        throw new Error(`Failed to compress image: ${fileName}`)
       }
+    } else {
+      // ไฟล์เล็ก ไม่ compress → ใช้ mime type เดิม
+      if (fileName.toLowerCase().endsWith('.png')) {
+        mimeType = 'image/png'
+      } else if (fileName.toLowerCase().endsWith('.webp')) {
+        mimeType = 'image/webp'
+      }
+      console.log(`✅ No compression needed: ${originalSizeMB}MB`)
     }
     
-    const base64String = `data:image/jpeg;base64,${buffer.toString('base64')}`
+    const base64String = `data:${mimeType};base64,${buffer.toString('base64')}`
     
     // Upload to Cloudinary
     const cloudinaryUrl = await uploadBase64ToCloudinary(base64String, 'hotelplus-v2')
