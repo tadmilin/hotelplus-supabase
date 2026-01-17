@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
 import { FolderTree, type TreeFolder } from '@/components/FolderTree'
+import imageCompression from 'browser-image-compression'
 
 interface DriveImage {
   id: string
@@ -250,12 +251,42 @@ export default function GptImagePage() {
   async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (files && files.length > 0) {
-      // Check file sizes and show warning if too large
-      const largeFiles = Array.from(files).filter(file => file.size > 5 * 1024 * 1024) // > 5MB
-      if (largeFiles.length > 0) {
-        console.warn(`${largeFiles.length} files are larger than 5MB. May cause upload issues.`)
+      setUploading(true)
+      
+      const compressedFiles: File[] = []
+      
+      for (const file of Array.from(files)) {
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+        
+        // Compress if file is larger than 3MB to ensure it stays under Vercel's 4.5MB limit
+        if (file.size > 3 * 1024 * 1024) {
+          console.log(`🔄 Compressing: ${file.name} (${fileSizeMB}MB)`)
+          
+          try {
+            const options = {
+              maxSizeMB: 3,
+              maxWidthOrHeight: 2048,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+            }
+            
+            const compressed = await imageCompression(file, options)
+            const compressedSizeMB = (compressed.size / (1024 * 1024)).toFixed(2)
+            console.log(`✅ Compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+            
+            compressedFiles.push(compressed)
+          } catch (err) {
+            console.error(`Failed to compress ${file.name}:`, err)
+            compressedFiles.push(file) // Use original if compression fails
+          }
+        } else {
+          console.log(`✓ ${file.name} (${fileSizeMB}MB) - no compression needed`)
+          compressedFiles.push(file)
+        }
       }
-      setInputImages(Array.from(files))
+      
+      setInputImages(compressedFiles)
+      setUploading(false)
     }
   }
 
