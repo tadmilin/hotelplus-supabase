@@ -539,13 +539,22 @@ export default function GptImagePage() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {selectedDriveImages.map((img) => (
-                      <div key={img.id} className="relative">
+                      <div key={img.id} className="relative group">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={img.thumbnailUrl}
                           alt={img.name}
                           className="w-20 h-20 object-cover rounded-lg border-2 border-green-500"
                         />
+                        <button
+                          onClick={() => {
+                            setSelectedDriveImages(prev => prev.filter(item => item.id !== img.id))
+                          }}
+                          className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="ลบรูปนี้"
+                        >
+                          ✕
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -573,13 +582,22 @@ export default function GptImagePage() {
             {inputImages.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {inputImages.map((file, index) => (
-                  <div key={index} className="relative">
+                  <div key={index} className="relative group">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={URL.createObjectURL(file)}
                       alt={`Preview ${index + 1}`}
                       className="w-20 h-20 object-cover rounded-lg border-2 border-purple-300"
                     />
+                    <button
+                      onClick={() => {
+                        setInputImages(prev => prev.filter((_, i) => i !== index))
+                      }}
+                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-lg transition-all opacity-0 group-hover:opacity-100"
+                      title="ลบรูปนี้"
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
               </div>
