@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { FolderTree, type TreeFolder } from '@/components/FolderTree'
 import { User } from '@supabase/supabase-js'
+import imageCompression from 'browser-image-compression'
 
 interface DriveImage {
   id: string
@@ -255,14 +256,6 @@ export default function CustomPromptPage() {
   async function handleFileUpload(files: FileList | null) {
     if (!files || files.length === 0) return
 
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-    const invalidFiles = Array.from(files).filter(file => !validTypes.includes(file.type))
-    
-    if (invalidFiles.length > 0) {
-      alert(`ไฟล์ต่อไปนี้ไม่รองรับ: ${invalidFiles.map(f => f.name).join(', ')}\n\nรองรับเฉพาะ: JPG, PNG, WebP`)
-      return
-    }
-
     setUploadingFiles(true)
     const uploadedImages: DriveImage[] = []
 
@@ -270,13 +263,29 @@ export default function CustomPromptPage() {
       // Upload files one by one, with auto-compression if needed
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-        setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name}...`)
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+        setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name} (${fileSizeMB}MB)...`)
 
         // Compress if file is larger than 3MB to fit in Vercel 4.5MB limit
         let fileToUpload = file
         if (file.size > 3 * 1024 * 1024) {
-          setStatus(`🗜️ กำลังบีบอัดรูป ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)...`)
-          fileToUpload = await compressImage(file)
+          setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB)...`)
+          
+          try {
+            const options = {
+              maxSizeMB: 3,
+              maxWidthOrHeight: 2048,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+            }
+            
+            fileToUpload = await imageCompression(file, options)
+            const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
+            console.log(`✅ Compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+          } catch (err) {
+            console.error(`Failed to compress ${file.name}:`, err)
+            // Use original file if compression fails
+          }
         }
 
         const formData = new FormData()
@@ -316,58 +325,6 @@ export default function CustomPromptPage() {
     } finally {
       setUploadingFiles(false)
     }
-  }
-
-  // Compress image using Canvas API
-  async function compressImage(file: File): Promise<File> {
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const img = document.createElement('img')
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          const ctx = canvas.getContext('2d')!
-          
-          // Calculate new dimensions (max 1920px)
-          let width = img.width
-          let height = img.height
-          const maxDim = 1920
-          
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = (height / width) * maxDim
-              width = maxDim
-            } else {
-              width = (width / height) * maxDim
-              height = maxDim
-            }
-          }
-          
-          canvas.width = width
-          canvas.height = height
-          ctx.drawImage(img, 0, 0, width, height)
-          
-          // Convert to blob with quality 0.8
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                const compressedFile = new File([blob], file.name, {
-                  type: 'image/jpeg',
-                  lastModified: Date.now(),
-                })
-                resolve(compressedFile)
-              } else {
-                resolve(file)
-              }
-            },
-            'image/jpeg',
-            0.8
-          )
-        }
-        img.src = e.target?.result as string
-      }
-      reader.readAsDataURL(file)
-    })
   }
 
   function toggleImageSelection(image: DriveImage) {
