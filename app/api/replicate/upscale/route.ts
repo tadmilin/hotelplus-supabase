@@ -7,7 +7,7 @@ const replicate = new Replicate({
 
 export async function POST(req: NextRequest) {
   try {
-    const { jobId, imageUrl, scale } = await req.json()
+    const { jobId, imageUrl, scale, faceEnhance } = await req.json()
 
     if (!jobId || !imageUrl) {
       return NextResponse.json(
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
       input: {
         image: imageUrl,
         scale: scale || 2,
-        face_enhance: false,
+        face_enhance: faceEnhance || false, // GFPGAN face enhancement
       },
       webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
       webhook_events_filter: ['completed'],

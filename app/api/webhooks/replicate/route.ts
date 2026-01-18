@@ -254,15 +254,19 @@ export async function POST(req: NextRequest) {
       // 📊 Auto-export to Google Sheets
       await exportJobToSheets(job.id)
 
-      // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, etc.)
-      // Exclude gpt-with-template as it already processed through Nano Banana Pro
-      const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image']
+      // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, gpt-with-template, etc.)
+      const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image', 'gpt-with-template']
       if (nonUpscaleTypes.includes(job.job_type) && outputUrls.length > 0) {
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)
         
         try {
+          // For gpt-with-template: only upscale the last image (final Nano Banana Pro output)
+          const urlsToUpscale = job.job_type === 'gpt-with-template' 
+            ? [outputUrls[outputUrls.length - 1]] 
+            : outputUrls
+
           // Create upscale jobs for each output
-          for (const outputUrl of outputUrls) {
+          for (const outputUrl of urlsToUpscale) {
             const { data: upscaleJob } = await supabaseAdmin
               .from('jobs')
               .insert({
@@ -288,7 +292,7 @@ export async function POST(req: NextRequest) {
                 input: {
                   image: outputUrl,
                   scale: 2,
-                  face_enhance: false,
+                  face_enhance: true, // ✅ เปิดอัตโนมัติสำหรับ auto-upscale (แก้หน้าคน)
                 },
                 webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
                 webhook_events_filter: ['completed'],

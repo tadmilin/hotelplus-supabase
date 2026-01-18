@@ -4,15 +4,17 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import { User } from '@supabase/supabase-js'
 
 export default function UpscalePage() {
   const router = useRouter()
   const supabase = createClient()
   
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [imageUrl, setImageUrl] = useState('')
-  const [uploadedImage, setUploadedImage] = useState<any>(null)
+  const [uploadedImage, setUploadedImage] = useState<{ url: string; thumbnailUrl: string } | null>(null)
   const [scale, setScale] = useState(2)
+  const [faceEnhance, setFaceEnhance] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -78,6 +80,11 @@ export default function UpscalePage() {
       return
     }
 
+    if (!user) {
+      setError('กรุณา login ก่อน')
+      return
+    }
+
     setCreating(true)
     setError('')
 
@@ -109,6 +116,7 @@ export default function UpscalePage() {
           jobId: job.id,
           imageUrl: imageUrl,
           scale: scale,
+          faceEnhance: faceEnhance,
         }),
       })
 
@@ -125,9 +133,9 @@ export default function UpscalePage() {
         .eq('id', job.id)
 
       router.push('/dashboard')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err)
-      setError(err.message || 'เกิดข้อผิดพลาดในการ Upscale')
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการ Upscale')
     } finally {
       setCreating(false)
     }
@@ -268,6 +276,38 @@ export default function UpscalePage() {
             </p>
           </div>
 
+          {/* Face Enhancement */}
+          <div className="bg-gradient-to-r from-pink-50 to-purple-50 border-2 border-pink-200 rounded-lg p-6">
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="faceEnhance"
+                checked={faceEnhance}
+                onChange={(e) => setFaceEnhance(e.target.checked)}
+                className="mt-1 w-5 h-5 text-pink-600 rounded focus:ring-2 focus:ring-pink-500"
+                disabled={creating}
+              />
+              <div className="flex-1">
+                <label htmlFor="faceEnhance" className="font-semibold text-gray-900 cursor-pointer flex items-center gap-2">
+                  <span>👤</span>
+                  <span>เปิดใช้ Face Enhancement (GFPGAN)</span>
+                </label>
+                <p className="text-sm text-gray-600 mt-2">
+                  ช่วยปรับปรุงและแก้ไขใบหน้าในรูป:
+                </p>
+                <ul className="text-xs text-gray-600 mt-2 space-y-1 ml-4">
+                  <li>✅ แก้หน้าเพี้ยน/เบลอ</li>
+                  <li>✅ เพิ่มรายละเอียดใบหน้า</li>
+                  <li>✅ ปรับสัดส่วนให้สมจริง</li>
+                  <li>⚠️ ใช้เวลานานขึ้น 20-30%</li>
+                </ul>
+                <p className="text-xs text-pink-700 font-semibold mt-2 bg-pink-100 px-2 py-1 rounded">
+                  💡 แนะนำสำหรับรูปคนที่หน้าไม่ชัดหรือมีปัญหา
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Info */}
           {imageUrl && (
             <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-4">
@@ -275,6 +315,7 @@ export default function UpscalePage() {
               <ul className="text-sm text-gray-700 space-y-1">
                 <li>• ขยาย: {scale}x</li>
                 <li>• Model: Real-ESRGAN</li>
+                <li>• Face Enhancement: {faceEnhance ? '✅ เปิด (GFPGAN)' : '❌ ปิด'}</li>
                 <li>• Output: PNG (คุณภาพสูง)</li>
                 <li>• เวลาโดยประมาณ: {scale === 2 ? '10-20' : '30-60'} วินาที</li>
               </ul>
