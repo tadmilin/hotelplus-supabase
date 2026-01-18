@@ -15,22 +15,23 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents)
     
-    // Get active spreadsheet
+    // Get active spreadsheet and active sheet
     const ss = SpreadsheetApp.getActiveSpreadsheet()
-    let sheet = ss.getSheetByName('Jobs Export')
+    const sheet = ss.getActiveSheet() // ใช้ active sheet
     
-    // Create sheet if not exists
-    if (!sheet) {
-      sheet = ss.insertSheet('Jobs Export')
-      
-      // Add headers
+    // Check if first row is empty or needs headers
+    const firstRow = sheet.getRange(1, 1, 1, 15).getValues()[0]
+    const isEmpty = firstRow.every(cell => cell === '' || cell === null)
+    
+    if (isEmpty) {
+      // Add headers if first row is empty
       const headers = [
         'Job ID', 'User Name', 'User Email', 'Job Type', 'Status',
         'Prompt', 'Template Type', 'Output Size', 'Input Images', 'Output Images',
         'Created At', 'Completed At', 'Duration (min)', 'Replicate ID', 'Error'
       ]
       
-      sheet.appendRow(headers)
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
       
       // Format header row
       const headerRange = sheet.getRange(1, 1, 1, headers.length)
