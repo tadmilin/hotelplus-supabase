@@ -89,3 +89,49 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
+// DELETE: ลบ drive folder ออกจากระบบ (ไม่ลบไฟล์จริงใน Google Drive)
+export async function DELETE(req: NextRequest) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { driveId } = await req.json()
+
+    if (!driveId) {
+      return NextResponse.json({ error: 'Drive ID required' }, { status: 400 })
+    }
+
+    // ลบ drive folder จาก google_drives table
+    // (ไม่ลบไฟล์จริงใน Google Drive - เพียงแค่ลบ record ในฐานข้อมูล)
+    const { error: deleteError } = await supabase
+      .from('google_drives')
+      .delete()
+      .eq('drive_id', driveId)
+
+    if (deleteError) {
+      console.error('Delete error:', deleteError)
+      return NextResponse.json({ error: 'Failed to delete drive folder' }, { status: 500 })
+    }
+
+    // ลบ user_drive_access ที่เกี่ยวข้องด้วย (CASCADE ควรทำให้อัตโนมัติ แต่ลบเผื่อ)
+    await supabase
+      .from('user_drive_access')
+      .delete()
+      .eq('drive_id', driveId)
+
+    console.log(`✅ Deleted drive folder: ${driveId} (database record only, Google Drive files unchanged)`)
+
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Drive folder removed from system (Google Drive files unchanged)' 
+    })
+  } catch (error) {
+    console.error('Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}

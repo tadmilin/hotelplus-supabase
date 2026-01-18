@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 สิ่งที่ห้ามแก้ไข: กรอบ, ข้อความ, โลโก้, ตำแหน่ง Layout
 สิ่งที่สามารถแก้ได้: ภาพพื้นหลังและรูปเล็กทั้งหมด (ต้องเป็นภาพใหม่ที่แนบมา)`
       
-      const input: any = {
+      const input: Record<string, unknown> = {
         image_input: [templateUrl, ...imageUrls],
         prompt: finalPrompt,
         aspect_ratio: outputSize || 'match_input_image',
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     
     // NO TEMPLATE: Create separate prediction for EACH image
     // Only use first image for this prediction (Frontend will handle creating multiple jobs)
-    const input: any = {
+    const input: Record<string, unknown> = {
       image_input: [imageUrls[0]],  // Use only the first image
       prompt: prompt,
       aspect_ratio: outputSize || 'match_input_image',
@@ -89,10 +89,11 @@ export async function POST(req: NextRequest) {
       id: prediction.id,
       status: prediction.status,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Replicate API error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create prediction'
     return NextResponse.json(
-      { error: error.message || 'Failed to create prediction' },
+      { error: errorMessage },
       { status: 500 }
     )
   }

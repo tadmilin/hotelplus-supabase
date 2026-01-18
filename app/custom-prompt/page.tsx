@@ -40,6 +40,7 @@ export default function CustomPromptPage() {
   const [syncing, setSyncing] = useState(false)
   const [loadingTimer, setLoadingTimer] = useState(0)
   const [isLoadingFolders, setIsLoadingFolders] = useState(false)
+  const [excludedFolderIds, setExcludedFolderIds] = useState<Set<string>>(new Set())
   
   // Template state
   const [enableTemplate, setEnableTemplate] = useState(false)
@@ -56,38 +57,16 @@ export default function CustomPromptPage() {
       }
       setUser(user)
       await loadAvailableDrives()
+      await loadExcludedFolders()
       
-      // Auto-sync if no drives found
-      const drives = await checkDrivesExist()
-      if (drives === 0) {
-        console.log('No drives found, auto-syncing...')
-        await syncDrives()
-      }
+      // ✅ ไม่ auto-sync อีกต่อไป - ให้ user เลือก drives เอง
+      // หรือกดปุ่ม Sync เอง (เพื่อให้การลบ drives มีประโยชน์)
       
       await fetchDriveFolders()
     }
     checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function checkDrivesExist() {
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=count`, {
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-          'Prefer': 'count=exact'
-        }
-      })
-      if (res.ok) {
-        const count = res.headers.get('content-range')?.split('/')[1]
-        return parseInt(count || '0')
-      }
-    } catch {
-      console.error('Error checking drives')
-    }
-    return 0
-  }
 
   async function loadAvailableDrives() {
     try {
@@ -152,6 +131,85 @@ export default function CustomPromptPage() {
     }
   }
 
+  async function deleteDriveFolder(driveId: string, driveName: string) {
+    const confirmed = confirm(
+      `⚠️ ลบ Drive "${driveName}" ออกจากระบบ?\n\n` +
+      `✅ จะลบ: Record ในฐานข้อมูล (เพื่อให้โหลดเร็วขึ้น)\n` +
+      `❌ จะไม่ลบ: ไฟล์จริงใน Google Drive (ยังคงอยู่)\n\n` +
+      `คุณสามารถ Sync กลับมาได้ทีหลัง`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const res = await fetch('/api/drive/user-drives', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveId }),
+      })
+
+      if (res.ok) {
+        alert('✅ ลบสำเร็จ! ไฟล์จริงใน Drive ยังคงอยู่')
+        await fetchDriveFolders()
+      } else {
+        alert('❌ ลบไม่สำเร็จ')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    }
+  }
+
+  async function loadExcludedFolders() {
+    try {
+      const res = await fetch('/api/drive/excluded-folders')
+      if (res.ok) {
+        const data = await res.json()
+        const ids: Set<string> = new Set(data.folders.map((f: { folder_id: string }) => f.folder_id))
+        setExcludedFolderIds(ids)
+      }
+    } catch (error) {
+      console.error('Error loading excluded folders:', error)
+    }
+  }
+
+  async function excludeFolder(folderId: string, folderName: string, driveId: string) {
+    const confirmed = confirm(
+      `⚠️ ซ่อนโฟลเดอร์ "${folderName}"?\n\n` +
+      `✅ จะซ่อน: โฟลเดอร์นี้จะไม่แสดงอีก (โหลดเร็วขึ้น)\n` +
+      `❌ จะไม่ลบ: ไฟล์จริงใน Drive ยังคงอยู่\n\n` +
+      `คุณสามารถแสดงกลับมาได้จากการตั้งค่า`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const res = await fetch('/api/drive/excluded-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId, folderName, driveId }),
+      })
+
+      if (res.ok) {
+        alert('✅ ซ่อนโฟลเดอร์สำเร็จ! กำลังโหลดใหม่...')
+        await loadExcludedFolders()
+        await fetchDriveFolders()
+      } else {
+        alert('❌ ไม่สามารถซ่อนโฟลเดอร์ได้')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    }
+  }
+
+  function filterExcludedFolders(folders: TreeFolder[]): TreeFolder[] {
+    return folders
+      .filter(folder => !excludedFolderIds.has(folder.id))
+      .map(folder => ({
+        ...folder,
+        children: folder.children ? filterExcludedFolders(folder.children) : []
+      }))
+  }
+
   async function fetchDriveFolders() {
     setIsLoadingFolders(true)
     setLoadingTimer(0)
@@ -166,10 +224,15 @@ export default function CustomPromptPage() {
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
-        setDriveFolders(data.drives || [])
+        // กรองโฟลเดอร์ที่ถูก exclude ออก
+        const filteredDrives = (data.drives || []).map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
+          ...drive,
+          folders: filterExcludedFolders(drive.folders)
+        }))
+        setDriveFolders(filteredDrives)
         
         // Count images in all folders
-        await countImagesInFolders(data.drives || [])
+        await countImagesInFolders(filteredDrives)
         
         setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
         setTimeout(() => setStatus(''), 3000)
@@ -385,63 +448,17 @@ export default function CustomPromptPage() {
 
     try {
       const selectedImages = Array.from(selectedImagesMap.values())
-
-      // Upload images to Cloudinary if from Drive
-      const imageUrls = []
-      for (let i = 0; i < selectedImages.length; i++) {
-        const img = selectedImages[i]
-        setStatus(`กำลังอัพโหลดรูปที่ ${i + 1}/${selectedImages.length}...`)
-        
-        // If image is from Drive (has webContentLink), download and upload
-        if (img.url.includes('drive.google.com')) {
-          const uploadRes = await fetch('/api/drive/download-and-upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fileId: img.id, fileName: img.name }),
-          })
-          
-          if (uploadRes.ok) {
-            const { url } = await uploadRes.json()
-            imageUrls.push(url)
-          }
-        } else {
-          imageUrls.push(img.url)
-        }
-      }
-
-      // Upload template image if enabled
-      let finalTemplateUrl = null
-      if (enableTemplate && selectedTemplate) {
-        setStatus('กำลังอัพโหลด Template...')
-        
-        // Find template image object
-        const templateImage = templateImages.find(img => img.url === selectedTemplate)
-        
-        if (templateImage) {
-          // If from Drive, download and upload to Cloudinary
-          if (selectedTemplate.includes('drive.google.com')) {
-            const uploadRes = await fetch('/api/drive/download-and-upload', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileId: templateImage.id, fileName: templateImage.name }),
-            })
-            
-            if (uploadRes.ok) {
-              const { url } = await uploadRes.json()
-              finalTemplateUrl = url
-            }
-          } else {
-            // Already uploaded to Cloudinary
-            finalTemplateUrl = selectedTemplate
-          }
-        }
-      }
-
-      // Create job(s) based on template usage
       if (!user) throw new Error('User not authenticated')
+
+      // ✅ CRITICAL: Prepare temporary URLs first (for job creation)
+      const tempImageUrls = selectedImages.map(img => img.url)
+      const tempTemplateUrl = enableTemplate ? selectedTemplate : null
+
+      // ✅ CREATE JOB(S) FIRST before any external API calls
+      const jobIds: string[] = []
       
-      if (enableTemplate && finalTemplateUrl) {
-        // WITH TEMPLATE: Create single job with all images
+      if (enableTemplate && tempTemplateUrl) {
+        // WITH TEMPLATE: Create single job
         const { data: job, error: jobError } = await supabase
           .from('jobs')
           .insert({
@@ -452,39 +469,18 @@ export default function CustomPromptPage() {
             status: 'processing',
             prompt: customPrompt,
             output_size: outputSize,
-            image_urls: imageUrls,
-            template_url: finalTemplateUrl,
+            image_urls: tempImageUrls,
+            template_url: tempTemplateUrl,
             output_urls: [],
           })
           .select()
           .single()
 
         if (jobError) throw jobError
-
-        const response = await fetch('/api/replicate/custom-prompt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jobId: job.id,
-            prompt: customPrompt,
-            imageUrls: imageUrls,
-            templateUrl: finalTemplateUrl,
-            outputSize: outputSize,
-          }),
-        })
-
-        if (!response.ok) throw new Error('Failed to create job')
-
-        const result = await response.json()
-        await supabase
-          .from('jobs')
-          .update({ replicate_id: result.id })
-          .eq('id', job.id)
+        jobIds.push(job.id)
       } else {
         // NO TEMPLATE: Create separate job for EACH image
-        for (let i = 0; i < imageUrls.length; i++) {
-          setStatus(`🎨 กำลังสร้างงานที่ ${i + 1}/${imageUrls.length}...`)
-          
+        for (let i = 0; i < tempImageUrls.length; i++) {
           const { data: job, error: jobError } = await supabase
             .from('jobs')
             .insert({
@@ -495,33 +491,160 @@ export default function CustomPromptPage() {
               status: 'processing',
               prompt: customPrompt,
               output_size: outputSize,
-              image_urls: [imageUrls[i]],  // Only this image
+              image_urls: [tempImageUrls[i]],
               output_urls: [],
             })
             .select()
             .single()
 
           if (jobError) throw jobError
+          jobIds.push(job.id)
+        }
+      }
 
+      // ✅ NOW upload images to Cloudinary (job already created)
+      const imageUrls = []
+      for (let i = 0; i < selectedImages.length; i++) {
+        const img = selectedImages[i]
+        setStatus(`กำลังอัพโหลดรูปที่ ${i + 1}/${selectedImages.length}...`)
+        
+        try {
+          if (img.url.includes('drive.google.com')) {
+            const uploadRes = await fetch('/api/drive/download-and-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileId: img.id, fileName: img.name }),
+            })
+            
+            if (uploadRes.ok) {
+              const { url } = await uploadRes.json()
+              imageUrls.push(url)
+            } else {
+              throw new Error(`Failed to upload image ${i + 1}`)
+            }
+          } else {
+            imageUrls.push(img.url)
+          }
+        } catch (uploadError) {
+          // Mark all jobs as failed if image upload fails
+          for (const jobId of jobIds) {
+            await supabase.from('jobs').update({
+              status: 'failed',
+              error: uploadError instanceof Error ? uploadError.message : 'Image upload failed'
+            }).eq('id', jobId)
+          }
+          throw uploadError
+        }
+      }
+
+      // Upload template image if enabled
+      let finalTemplateUrl = null
+      if (enableTemplate && selectedTemplate) {
+        setStatus('กำลังอัพโหลด Template...')
+        
+        try {
+          const templateImage = templateImages.find(img => img.url === selectedTemplate)
+          
+          if (templateImage) {
+            if (selectedTemplate.includes('drive.google.com')) {
+              const uploadRes = await fetch('/api/drive/download-and-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileId: templateImage.id, fileName: templateImage.name }),
+              })
+              
+              if (uploadRes.ok) {
+                const { url } = await uploadRes.json()
+                finalTemplateUrl = url
+              } else {
+                throw new Error('Template upload failed')
+              }
+            } else {
+              finalTemplateUrl = selectedTemplate
+            }
+          }
+        } catch (templateError) {
+          // Mark job as failed if template upload fails
+          await supabase.from('jobs').update({
+            status: 'failed',
+            error: templateError instanceof Error ? templateError.message : 'Template upload failed'
+          }).eq('id', jobIds[0])
+          throw templateError
+        }
+
+        // Update job with final template URL
+        await supabase.from('jobs').update({
+          template_url: finalTemplateUrl
+        }).eq('id', jobIds[0])
+      }
+
+      // Update jobs with final Cloudinary URLs
+      if (enableTemplate && finalTemplateUrl) {
+        await supabase.from('jobs').update({
+          image_urls: imageUrls
+        }).eq('id', jobIds[0])
+      } else {
+        for (let i = 0; i < jobIds.length; i++) {
+          await supabase.from('jobs').update({
+            image_urls: [imageUrls[i]]
+          }).eq('id', jobIds[i])
+        }
+      }
+
+      // Call Replicate API(s)
+      if (enableTemplate && finalTemplateUrl) {
+        setStatus('🎨 กำลังส่งงานไป Replicate...')
+        try {
           const response = await fetch('/api/replicate/custom-prompt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              jobId: job.id,
+              jobId: jobIds[0],
               prompt: customPrompt,
-              imageUrls: [imageUrls[i]],  // Send only one image
-              templateUrl: null,
+              imageUrls: imageUrls,
+              templateUrl: finalTemplateUrl,
               outputSize: outputSize,
             }),
           })
 
-          if (!response.ok) throw new Error(`Failed to create job ${i + 1}`)
+          if (!response.ok) throw new Error('Failed to create job')
 
           const result = await response.json()
-          await supabase
-            .from('jobs')
-            .update({ replicate_id: result.id })
-            .eq('id', job.id)
+          await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[0])
+        } catch (apiError) {
+          await supabase.from('jobs').update({
+            status: 'failed',
+            error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+          }).eq('id', jobIds[0])
+          throw apiError
+        }
+      } else {
+        for (let i = 0; i < jobIds.length; i++) {
+          setStatus(`🎨 กำลังส่งงานที่ ${i + 1}/${jobIds.length}...`)
+          try {
+            const response = await fetch('/api/replicate/custom-prompt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jobId: jobIds[i],
+                prompt: customPrompt,
+                imageUrls: [imageUrls[i]],
+                templateUrl: null,
+                outputSize: outputSize,
+              }),
+            })
+
+            if (!response.ok) throw new Error(`Failed to create job ${i + 1}`)
+
+            const result = await response.json()
+            await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[i])
+          } catch (apiError) {
+            await supabase.from('jobs').update({
+              status: 'failed',
+              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+            }).eq('id', jobIds[i])
+            throw apiError
+          }
         }
       }
 
@@ -678,21 +801,41 @@ export default function CustomPromptPage() {
           <div className="lg:col-span-2 space-y-6">
             {/* Drive Folders */}
             <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-xl font-bold text-purple-900 mb-4">
-                1️⃣ เลือกรูปจาก Google Drive
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-purple-900">
+                  1️⃣ เลือกรูปจาก Google Drive
+                </h2>
+                <button
+                  onClick={() => setShowDriveSelector(true)}
+                  className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-lg font-semibold transition-colors"
+                  title="จัดการ Drives"
+                >
+                  ⚙️ จัดการ Drives
+                </button>
+              </div>
               
               {driveFolders.map((drive) => (
                 <div key={drive.driveId} className="mb-6">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                    <span>📱</span>
-                    <span>{drive.driveName}</span>
-                  </h3>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                      <span>📱</span>
+                      <span>{drive.driveName}</span>
+                    </h3>
+                    <button
+                      onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
+                      title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                   <FolderTree
                     folders={drive.folders}
                     onSelectFolder={setSelectedFolderId}
                     selectedFolderId={selectedFolderId}
                     imageCounts={imageCounts}
+                    onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                    driveId={drive.driveId}
                   />
                 </div>
               ))}
@@ -892,6 +1035,8 @@ export default function CustomPromptPage() {
                           folders={drive.folders}
                           onSelectFolder={setTemplateFolderId}
                           selectedFolderId={templateFolderId}
+                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                          driveId={drive.driveId}
                         />
                       </div>
                     ))}

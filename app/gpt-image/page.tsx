@@ -47,6 +47,7 @@ export default function GptImagePage() {
   const [showDriveSelector, setShowDriveSelector] = useState(false)
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
+  const [excludedFolderIds, setExcludedFolderIds] = useState<Set<string>>(new Set())
 
   // Template Mode (GPT → Nano Banana Pro Pipeline)
   const [useTemplate, setUseTemplate] = useState(false)
@@ -62,38 +63,16 @@ export default function GptImagePage() {
       }
       setUser(user)
       await loadAvailableDrives()
+      await loadExcludedFolders()
       
-      // Auto-sync if no drives found
-      const drives = await checkDrivesExist()
-      if (drives === 0) {
-        console.log('No drives found, auto-syncing...')
-        await syncDrives()
-      }
+      // ✅ ไม่ auto-sync อีกต่อไป - ให้ user เลือก drives เอง
+      // หรือกดปุ่ม Sync เอง (เพื่อให้การลบ drives มีประโยชน์)
       
       await fetchDriveFolders()
     }
     checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function checkDrivesExist() {
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/google_drives?select=count`, {
-        headers: {
-          'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-          'Prefer': 'count=exact'
-        }
-      })
-      if (res.ok) {
-        const count = res.headers.get('content-range')?.split('/')[1]
-        return parseInt(count || '0')
-      }
-    } catch {
-      console.error('Error checking drives')
-    }
-    return 0
-  }
 
   async function loadAvailableDrives() {
     try {
@@ -158,6 +137,85 @@ export default function GptImagePage() {
     }
   }
 
+  async function deleteDriveFolder(driveId: string, driveName: string) {
+    const confirmed = confirm(
+      `⚠️ ลบ Drive "${driveName}" ออกจากระบบ?\n\n` +
+      `✅ จะลบ: Record ในฐานข้อมูล (เพื่อให้โหลดเร็วขึ้น)\n` +
+      `❌ จะไม่ลบ: ไฟล์จริงใน Google Drive (ยังคงอยู่)\n\n` +
+      `คุณสามารถ Sync กลับมาได้ทีหลัง`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const res = await fetch('/api/drive/user-drives', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveId }),
+      })
+
+      if (res.ok) {
+        alert('✅ ลบสำเร็จ! ไฟล์จริงใน Drive ยังคงอยู่')
+        await fetchDriveFolders()
+      } else {
+        alert('❌ ลบไม่สำเร็จ')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    }
+  }
+
+  async function loadExcludedFolders() {
+    try {
+      const res = await fetch('/api/drive/excluded-folders')
+      if (res.ok) {
+        const data: { folders: Array<{ folder_id: string }> } = await res.json()
+        const ids = new Set<string>(data.folders.map(f => f.folder_id))
+        setExcludedFolderIds(ids)
+      }
+    } catch (error) {
+      console.error('Error loading excluded folders:', error)
+    }
+  }
+
+  async function excludeFolder(folderId: string, folderName: string, driveId: string) {
+    const confirmed = confirm(
+      `⚠️ ซ่อนโฟลเดอร์ "${folderName}"?\n\n` +
+      `✅ จะซ่อน: โฟลเดอร์นี้จะไม่แสดงอีก (โหลดเร็วขึ้น)\n` +
+      `❌ จะไม่ลบ: ไฟล์จริงใน Drive ยังคงอยู่\n\n` +
+      `คุณสามารถแสดงกลับมาได้จากการตั้งค่า`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const res = await fetch('/api/drive/excluded-folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId, folderName, driveId }),
+      })
+
+      if (res.ok) {
+        alert('✅ ซ่อนโฟลเดอร์สำเร็จ! กำลังโหลดใหม่...')
+        await loadExcludedFolders()
+        await fetchDriveFolders()
+      } else {
+        alert('❌ ไม่สามารถซ่อนโฟลเดอร์ได้')
+      }
+    } catch {
+      alert('❌ เกิดข้อผิดพลาด')
+    }
+  }
+
+  function filterExcludedFolders(folders: TreeFolder[]): TreeFolder[] {
+    return folders
+      .filter(folder => !excludedFolderIds.has(folder.id))
+      .map(folder => ({
+        ...folder,
+        children: folder.children ? filterExcludedFolders(folder.children) : []
+      }))
+  }
+
   async function fetchDriveFolders() {
     setIsLoadingFolders(true)
     setLoadingTimer(0)
@@ -170,8 +228,13 @@ export default function GptImagePage() {
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
-        setDriveFolders(data.drives || [])
-        await countImagesInFolders(data.drives || [])
+        // กรองโฟลเดอร์ที่ถูก exclude ออก
+        const filteredDrives = (data.drives || []).map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
+          ...drive,
+          folders: filterExcludedFolders(drive.folders)
+        }))
+        setDriveFolders(filteredDrives)
+        await countImagesInFolders(filteredDrives)
       }
     } catch (error) {
       console.error('Error fetching Drive folders:', error)
@@ -747,7 +810,16 @@ export default function GptImagePage() {
           {/* Google Drive Images */}
           {driveFolders.length > 0 && (
             <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-xl p-6 border-2 border-green-200">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">📂 เลือกรูปจาก Google Drive</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">📂 เลือกรูปจาก Google Drive</h3>
+                <button
+                  onClick={() => setShowDriveSelector(true)}
+                  className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-lg font-semibold transition-colors"
+                  title="จัดการ Drives"
+                >
+                  ⚙️ จัดการ Drives
+                </button>
+              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Folder Tree */}
@@ -756,15 +828,26 @@ export default function GptImagePage() {
                     <h4 className="text-sm font-semibold text-gray-700 mb-3">โฟลเดอร์:</h4>
                     {driveFolders.map((drive) => (
                       <div key={drive.driveId} className="mb-4">
-                        <h5 className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-2">
-                          <span>📱</span>
-                          <span>{drive.driveName}</span>
-                        </h5>
+                        <div className="flex items-center justify-between mb-2">
+                          <h5 className="text-xs font-semibold text-gray-600 flex items-center gap-2">
+                            <span>📱</span>
+                            <span>{drive.driveName}</span>
+                          </h5>
+                          <button
+                            onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
+                            title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                         <FolderTree
                           folders={drive.folders}
                           onSelectFolder={setSelectedFolderId}
                           selectedFolderId={selectedFolderId}
                           imageCounts={imageCounts}
+                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                          driveId={drive.driveId}
                         />
                       </div>
                     ))}
