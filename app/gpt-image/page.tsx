@@ -404,6 +404,16 @@ export default function GptImagePage() {
         output_urls: [],
       }
 
+      // ✅ CRITICAL: INSERT to DB FIRST (before any external API calls)
+      // This ensures job is tracked even if template upload or Replicate API fails
+      const { data: job, error: jobError } = await supabase
+        .from('jobs')
+        .insert(jobData)
+        .select()
+        .single()
+
+      if (jobError) throw jobError
+
       // Upload template if template mode is enabled
       if (useTemplate && templateFile) {
         setUploading(true)
@@ -412,34 +422,44 @@ export default function GptImagePage() {
         const formData = new FormData()
         formData.append('files', templateFile)
 
-        const templateUpload = await fetch('/api/upload-images', {
-          method: 'POST',
-          body: formData,
-        })
+        try {
+          const templateUpload = await fetch('/api/upload-images', {
+            method: 'POST',
+            body: formData,
+          })
 
-        if (!templateUpload.ok) {
-          throw new Error('ไม่สามารถอัพโหลด Template ได้')
+          if (!templateUpload.ok) {
+            throw new Error('ไม่สามารถอัพโหลด Template ได้')
+          }
+
+          const templateData = await templateUpload.json()
+          const templateUrl = templateData.images[0]?.url
+          
+          if (!templateUrl) {
+            throw new Error('ไม่พบ URL ของ Template')
+          }
+
+          // Update job with template URL
+          await supabase
+            .from('jobs')
+            .update({ template_url: templateUrl })
+            .eq('id', job.id)
+
+          jobData.template_url = templateUrl
+          setUploading(false)
+          console.log('✅ Template uploaded:', templateUrl)
+        } catch (templateError) {
+          // Mark job as failed if template upload fails
+          await supabase
+            .from('jobs')
+            .update({ 
+              status: 'failed',
+              error: templateError instanceof Error ? templateError.message : 'Template upload failed'
+            })
+            .eq('id', job.id)
+          throw templateError
         }
-
-        const templateData = await templateUpload.json()
-        const templateUrl = templateData.images[0]?.url
-        
-        if (!templateUrl) {
-          throw new Error('ไม่พบ URL ของ Template')
-        }
-
-        jobData.template_url = templateUrl
-        setUploading(false)
-        console.log('✅ Template uploaded:', templateUrl)
       }
-
-      const { data: job, error: jobError } = await supabase
-        .from('jobs')
-        .insert(jobData)
-        .select()
-        .single()
-
-      if (jobError) throw jobError
 
       // Call appropriate API based on mode
       const apiEndpoint = useTemplate ? '/api/replicate/gpt-with-template' : '/api/replicate/gpt-image'
@@ -464,29 +484,41 @@ export default function GptImagePage() {
       }
 
       // Call Replicate API
-      const response = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(apiBody),
-      })
+      try {
+        const response = await fetch(apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(apiBody),
+        })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create images')
-      }
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to create images')
+        }
 
-      const result = await response.json()
+        const result = await response.json()
 
-      // Update job with replicate_id (for non-pipeline mode)
-      if (!useTemplate && result.id) {
+        // Update job with replicate_id (for non-pipeline mode)
+        if (!useTemplate && result.id) {
+          await supabase
+            .from('jobs')
+            .update({ replicate_id: result.id })
+            .eq('id', job.id)
+        }
+
+        // Redirect to dashboard
+        router.push('/dashboard')
+      } catch (apiError) {
+        // Mark job as failed if Replicate API fails
         await supabase
           .from('jobs')
-          .update({ replicate_id: result.id })
+          .update({ 
+            status: 'failed',
+            error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+          })
           .eq('id', job.id)
+        throw apiError
       }
-
-      // Redirect to dashboard
-      router.push('/dashboard')
     } catch (err: unknown) {
       console.error('Error:', err)
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสร้างรูป'
