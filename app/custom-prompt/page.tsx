@@ -335,14 +335,24 @@ export default function CustomPromptPage() {
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
         setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name} (${fileSizeMB}MB)...`)
 
-        // Compress if file is larger than 3MB to fit in Vercel 4.5MB limit
+        // Check file size limit (50MB max)
+        if (file.size > 50 * 1024 * 1024) {
+          alert(`❌ ไฟล์ ${file.name} ใหญ่เกินไป (${fileSizeMB}MB)\nขนาดสูงสุด 50MB`)
+          continue
+        }
+
+        // Compress if file is larger than 5MB to fit in Vercel limit
         let fileToUpload = file
-        if (file.size > 3 * 1024 * 1024) {
+        const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                       file.name.toLowerCase().endsWith('.heic') || 
+                       file.name.toLowerCase().endsWith('.heif')
+        
+        if (file.size > 5 * 1024 * 1024 && !isHEIC) {
           setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB)...`)
           
           try {
             const options = {
-              maxSizeMB: 3,
+              maxSizeMB: 5,
               maxWidthOrHeight: 2048,
               useWebWorker: true,
               fileType: 'image/jpeg' as const,
@@ -353,8 +363,12 @@ export default function CustomPromptPage() {
             console.log(`✅ Compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
           } catch (err) {
             console.error(`Failed to compress ${file.name}:`, err)
-            // Use original file if compression fails
+            alert(`⚠️ ไม่สามารถบีบอัด ${file.name} ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
+            // Server will handle compression
           }
+        } else if (isHEIC) {
+          console.log(`📱 HEIC/HEIF detected: ${file.name} - server will convert`)
+          setStatus(`📱 กำลังแปลงไฟล์ iPhone ${file.name}...`)
         }
 
         const formData = new FormData()
@@ -870,7 +884,7 @@ export default function CustomPromptPage() {
                   type="file"
                   id="file-upload"
                   multiple
-                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                  accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
                   onChange={(e) => handleFileUpload(e.target.files)}
                   className="hidden"
                 />
@@ -1052,25 +1066,36 @@ export default function CustomPromptPage() {
                       <input
                         type="file"
                         id="template-upload"
-                        accept="image/*"
+                        accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
                         onChange={async (e) => {
                           const files = e.target.files
                           if (!files || files.length === 0) return
                           
                           setUploadingFiles(true)
-                          setStatus('📤 กำลังอัพโหลด Template...')
                           
                           const file = files[0]
                           const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+                          setStatus(`📤 กำลังอัพโหลด Template: ${file.name} (${fileSizeMB}MB)...`)
+
+                          // Check file size limit (50MB max)
+                          if (file.size > 50 * 1024 * 1024) {
+                            alert(`❌ ไฟล์ Template ใหญ่เกินไป (${fileSizeMB}MB)\nขนาดสูงสุด 50MB`)
+                            setUploadingFiles(false)
+                            return
+                          }
                           
-                          // Compress if file is larger than 3MB
+                          // Compress if file is larger than 5MB
                           let fileToUpload = file
-                          if (file.size > 3 * 1024 * 1024) {
+                          const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                                         file.name.toLowerCase().endsWith('.heic') || 
+                                         file.name.toLowerCase().endsWith('.heif')
+                          
+                          if (file.size > 5 * 1024 * 1024 && !isHEIC) {
                             setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
                             
                             try {
                               const options = {
-                                maxSizeMB: 3,
+                                maxSizeMB: 5,
                                 maxWidthOrHeight: 2048,
                                 useWebWorker: true,
                                 fileType: 'image/jpeg' as const,
@@ -1081,7 +1106,11 @@ export default function CustomPromptPage() {
                               console.log(`✅ Template compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
                             } catch (err) {
                               console.error('Failed to compress template:', err)
+                              alert(`⚠️ ไม่สามารถบีบอัด Template ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
                             }
+                          } else if (isHEIC) {
+                            console.log(`📱 HEIC/HEIF Template detected - server will convert`)
+                            setStatus(`📱 กำลังแปลงไฟล์ iPhone Template...`)
                           }
                           
                           const formData = new FormData()
