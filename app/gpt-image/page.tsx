@@ -63,11 +63,10 @@ export default function GptImagePage() {
       }
       setUser(user)
       await loadAvailableDrives()
+      
+      // ✅ โหลด excluded folders ก่อน แล้วค่อยโหลดโฟลเดอร์
+      // เพื่อให้แน่ใจว่ากรองถูกต้อง
       await loadExcludedFolders()
-      
-      // ✅ ไม่ auto-sync อีกต่อไป - ให้ user เลือก drives เอง
-      // หรือกดปุ่ม Sync เอง (เพื่อให้การลบ drives มีประโยชน์)
-      
       await fetchDriveFolders()
     }
     checkAuth()
@@ -198,6 +197,8 @@ export default function GptImagePage() {
 
       if (res.ok) {
         alert('✅ ซ่อนโฟลเดอร์สำเร็จ! กำลังโหลดใหม่...')
+        // ⚠️ โหลด excluded folders ก่อน แล้วค่อย fetch drives
+        // เพื่อให้ state อัปเดตก่อนกรองโฟลเดอร์
         await loadExcludedFolders()
         await fetchDriveFolders()
       } else {
@@ -226,6 +227,10 @@ export default function GptImagePage() {
     }, 100)
     
     try {
+      // ⚠️ IMPORTANT: โหลด excluded folders ก่อนเสมอ
+      // เพื่อให้แน่ใจว่า excludedFolderIds มีข้อมูลล่าสุด
+      await loadExcludedFolders()
+      
       // ✅ ดึงจาก database (user_drive_access) - เร็ว!
       // ไม่ sync จาก Google API อัตโนมัติอีกต่อไป
       const res = await fetch('/api/drive/list-folders')

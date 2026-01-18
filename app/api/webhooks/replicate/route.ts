@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
 import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
+import { getSheetsClient } from '@/lib/google-sheets'
 import crypto from 'crypto'
 
 // Create Supabase client with service role key for admin operations
@@ -15,6 +16,74 @@ const supabaseAdmin = createClient(
     },
   }
 )
+
+// Auto-export job to Google Sheets
+async function exportJobToSheets(jobId: string) {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_EXPORT_SPREADSHEET_ID
+  
+  if (!spreadsheetId) {
+    console.log('⚠️ GOOGLE_SHEETS_EXPORT_SPREADSHEET_ID not configured, skipping export')
+    return
+  }
+
+  try {
+    const sheets = getSheetsClient()
+    if (!sheets) {
+      console.log('⚠️ Google Sheets client not available')
+      return
+    }
+
+    // Fetch the completed job
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single()
+
+    if (jobError || !job) {
+      console.error('❌ Failed to fetch job for export:', jobError)
+      return
+    }
+
+    const createdAt = new Date(job.created_at)
+    const completedAt = job.completed_at ? new Date(job.completed_at) : null
+    const duration = completedAt 
+      ? Math.round((completedAt.getTime() - createdAt.getTime()) / 60000) 
+      : null
+
+    const rowData = [
+      job.id,
+      job.user_name || '',
+      job.user_email || '',
+      job.job_type || '',
+      job.status || '',
+      job.prompt || '',
+      job.template_type || '',
+      job.output_size || '',
+      (job.image_urls || []).length,
+      (job.output_urls || []).length,
+      createdAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+      completedAt ? completedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
+      duration || '',
+      job.replicate_id || '',
+      job.error || ''
+    ]
+
+    // Append row to sheet
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: 'Jobs Export!A:O',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [rowData]
+      }
+    })
+
+    console.log('✅ Exported job to Google Sheets:', jobId)
+  } catch (error) {
+    console.error('⚠️ Failed to export to Google Sheets (non-critical):', error)
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -181,6 +250,9 @@ export async function POST(req: NextRequest) {
       }
 
       console.log('✅ Job updated successfully')
+
+      // 📊 Auto-export to Google Sheets
+      await exportJobToSheets(job.id)
 
       // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, etc.)
       // Exclude gpt-with-template as it already processed through Nano Banana Pro

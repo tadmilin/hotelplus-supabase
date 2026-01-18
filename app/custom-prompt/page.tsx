@@ -222,6 +222,11 @@ export default function CustomPromptPage() {
     
     try {
       setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
+      
+      // ⚠️ IMPORTANT: โหลด excluded folders ก่อนเสมอ
+      // เพื่อให้แน่ใจว่า excludedFolderIds มีข้อมูลล่าสุด
+      await loadExcludedFolders()
+      
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
