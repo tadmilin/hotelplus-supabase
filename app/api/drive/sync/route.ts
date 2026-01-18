@@ -65,27 +65,29 @@ export async function POST() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    // Clear old drives
-    await supabaseAdmin
-      .from('google_drives')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000')
-
-    // Insert new drives
+    // ✅ แทนที่จะลบ google_drives ทั้งหมด - ให้ใช้ UPSERT
+    // เพื่อให้ user อื่นๆ ที่ยังใช้ drives เก่าไม่เจอปัญหา
+    
     const driveData = drives.map(d => ({
       drive_id: d.id!,
       drive_name: d.name!,
       synced_at: new Date().toISOString()
     }))
 
-    const { error: insertError } = await supabaseAdmin
+    // UPSERT drives (update if exists, insert if new)
+    const { error: upsertError } = await supabaseAdmin
       .from('google_drives')
-      .insert(driveData)
+      .upsert(driveData, { 
+        onConflict: 'drive_id',
+        ignoreDuplicates: false 
+      })
 
-    if (insertError) {
-      console.error('Insert error:', insertError)
+    if (upsertError) {
+      console.error('Upsert error:', upsertError)
       return NextResponse.json({ error: 'Failed to sync drives' }, { status: 500 })
     }
+
+    console.log(`✅ Synced ${drives.length} drives to google_drives table`)
 
     return NextResponse.json({ 
       success: true, 

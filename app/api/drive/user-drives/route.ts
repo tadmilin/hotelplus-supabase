@@ -106,29 +106,25 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Drive ID required' }, { status: 400 })
     }
 
-    // ลบ drive folder จาก google_drives table
-    // (ไม่ลบไฟล์จริงใน Google Drive - เพียงแค่ลบ record ในฐานข้อมูล)
+    // ✅ ลบจาก user_drive_access เท่านั้น (แยกการแสดงผลแต่ละ user)
+    // ไม่ลบจาก google_drives (ยังคงอยู่สำหรับ user อื่น)
+    // ไม่ลบไฟล์จริงใน Google Drive
     const { error: deleteError } = await supabase
-      .from('google_drives')
+      .from('user_drive_access')
       .delete()
+      .eq('user_id', user.id)
       .eq('drive_id', driveId)
 
     if (deleteError) {
       console.error('Delete error:', deleteError)
-      return NextResponse.json({ error: 'Failed to delete drive folder' }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to remove drive from your list' }, { status: 500 })
     }
 
-    // ลบ user_drive_access ที่เกี่ยวข้องด้วย (CASCADE ควรทำให้อัตโนมัติ แต่ลบเผื่อ)
-    await supabase
-      .from('user_drive_access')
-      .delete()
-      .eq('drive_id', driveId)
-
-    console.log(`✅ Deleted drive folder: ${driveId} (database record only, Google Drive files unchanged)`)
+    console.log(`✅ User ${user.email} removed drive ${driveId} from their list (Google Drive files unchanged)`)
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Drive folder removed from system (Google Drive files unchanged)' 
+      message: 'Drive removed from your list (can sync back anytime)' 
     })
   } catch (error) {
     console.error('Error:', error)
