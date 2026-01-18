@@ -1,4 +1,4 @@
-# 📊 Google Sheets Auto-Export Setup
+# 📊 Google Sheets Auto-Export Setup (Apps Script)
 
 ระบบจะ export ข้อมูล jobs อัตโนมัติไปยัง Google Sheets ทุกครั้งที่ job เสร็จสิ้น
 
@@ -11,38 +11,224 @@
 1. ไปที่ https://sheets.google.com
 2. คลิก **+ Blank** เพื่อสร้าง Spreadsheet ใหม่
 3. ตั้งชื่อว่า "HotelPlus Jobs Export" (หรือชื่ออื่นตามต้องการ)
-4. สร้าง Sheet ชื่อ "Jobs Export" (หรือเปลี่ยนชื่อ Sheet1)
 
-### **2. คัดลอก Spreadsheet ID**
+### **2. เพิ่ม Apps Script**
 
-จาก URL ของ Spreadsheet:
+1. คลิก **Extensions** → **Apps Script**
+2. ลบ code เดิมทิ้ง
+3. Copy code จากไฟล์ `scripts/google-apps-script.js` ไปวาง
+4. คลิก **💾 Save** (Ctrl+S)
+5. ตั้งชื่อ Project: "HotelPlus Export"
+
+### **3. Deploy Web App**
+
+1. คลิก **Deploy** → **New deployment**
+2. คลิก ⚙️ → เลือก **Web app**
+3. ตั้งค่า:
+   - **Execute as**: Me (your-email@gmail.com)
+   - **Who has access**: **Anyone**
+4. คลิก **Deploy**
+5. **Copy Web app URL** (จะได้ URL แบบนี้):
+   ```
+   https://script.google.com/macros/s/AKfycbx.../exec
+   ```
+
+### **4. เพิ่ม Environment Variable ใน Vercel**
+
+1. ไปที่ Vercel Dashboard → Project → **Settings** → **Environment Variables**
+2. เพิ่ม:
+   ```
+   GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/AKfycbx.../exec
+   ```
+3. คลิก **Save**
+4. **Redeploy** project (Deployments → คลิก ... → Redeploy)
+
+### **5. ทดสอบ (Optional)**
+
+ใน Apps Script Editor:
+1. เลือกฟังก์ชัน **testDoPost**
+2. คลิก **▶ Run**
+3. Authorize permissions (คลิก Review → Go to HotelPlus Export → Allow)
+4. เช็ค Execution log → ควรเห็น `{ "success": true, ... }`
+5. เช็ค Spreadsheet → ควรมี Sheet "Jobs Export" พร้อม test data
+
+---
+
+## 📋 ข้อมูลที่ Export
+
+| Column | Description |
+|--------|-------------|
+| Job ID | UUID ของงาน |
+| User Name | ชื่อผู้ใช้ |
+| User Email | อีเมลผู้ใช้ |
+| Job Type | ประเภทงาน (text-to-image, custom-prompt, gpt-image, upscale) |
+| Status | สถานะ (completed, failed) |
+| Prompt | คำสั่งสร้างรูป |
+| Template Type | ประเภท template (ถ้ามี) |
+| Output Size | ขนาด output (x2, x4) |
+| Input Images | จำนวนรูป input |
+| Output Images | จำนวนรูป output |
+| Created At | วันที่สร้างงาน (เวลาไทย) |
+| Completed At | วันที่เสร็จสิ้น (เวลาไทย) |
+| Duration (min) | ระยะเวลาประมวลผล (นาที) |
+| Replicate ID | ID จาก Replicate API |
+| Error | ข้อความ error (ถ้ามี) |
+
+---
+
+## 🔍 การทำงาน
+
+### **Auto-Export Flow:**
+
+1. User สร้างรูป → สร้าง Job ใน Database
+2. Replicate API ประมวลผล
+3. Webhook ได้รับ `status: completed`
+4. อัพโหลดรูปไป Cloudinary
+5. **📊 POST ข้อมูลไป Apps Script URL**
+6. Apps Script append row ใน Google Sheets
+7. Update job status
+
+### **Export Timing:**
+
+- ✅ Export ทุกครั้งที่ job **completed**
+- ❌ ไม่ export job ที่ **processing**
+- ✅ Export ทุกประเภท job (text-to-image, custom-prompt, gpt-image, gpt-with-template, upscale)
+
+---
+
+## ⚠️ Troubleshooting
+
+### **1. Authorization Required**
+
 ```
-https://docs.google.com/spreadsheets/d/[SPREADSHEET_ID]/edit
+Authorization needed
 ```
 
-เช่น: `1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms`
+**แก้ไข:**
+- รัน `testDoPost()` ใน Apps Script Editor
+- Authorize permissions เมื่อมี popup
+- ต้อง Allow access to Google Sheets
 
-### **3. Share Spreadsheet กับ Service Account**
+### **2. 404 Not Found**
 
-1. คลิก **Share** (ปุ่มสีเขียวมุมบนขว่า)
-2. เพิ่ม Email: `ai-backend@testapi-480011.iam.gserviceaccount.com`
-   (หรือ Service Account Email ของคุณ)
-3. เลือกสิทธิ์: **Editor**
-4. คลิก **Send**
+```
+Failed to export to Google Sheets: Not Found
+```
 
-### **4. เพิ่ม Environment Variable**
+**แก้ไข:**
+- ตรวจสอบ URL ใน Vercel env vars
+- ต้องเป็น URL ที่ลงท้ายด้วย `/exec` (ไม่ใช่ `/dev`)
+- Redeploy Apps Script ใหม่แล้ว copy URL ใหม่
 
-เพิ่มใน `.env.local`:
+### **3. Permission Denied**
 
+```
+Exception: You do not have permission to call...
+```
+
+**แก้ไข:**
+- ตั้ง "Execute as: **Me**"
+- ตั้ง "Who has access: **Anyone**"
+- Redeploy Web app
+
+### **4. ไม่มีข้อมูล Export**
+
+**เช็คว่า:**
 ```bash
-GOOGLE_SHEETS_EXPORT_SPREADSHEET_ID=your_spreadsheet_id_here
+# ใน Vercel env vars ต้องมี:
+GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/...
 ```
 
-### **5. Restart Server**
+**ดู Logs:**
+```
+✅ Exported job to Google Sheets: [job_id]
+⚠️ GOOGLE_SHEETS_WEBHOOK_URL not configured, skipping export
+```
 
+---
+
+## 💡 ข้อดีของ Apps Script
+
+✅ **ง่ายกว่า Service Account:**
+- ไม่ต้องสร้าง Service Account
+- ไม่ต้อง manage private keys
+- ไม่ต้อง share spreadsheet
+- ใช้ env แค่ตัวเดียว (URL)
+
+✅ **Auto-create Sheet:**
+- สร้าง "Jobs Export" sheet อัตโนมัติ
+- เพิ่ม headers พร้อม format สวยงาม
+- Freeze row แรกอัตโนมัติ
+
+✅ **Error Handling:**
+- Return JSON response ชัดเจน
+- ใช้ try-catch ป้องกัน crash
+
+---
+
+## 🧪 ทดสอบการทำงาน
+
+### **1. Test ใน Apps Script Editor:**
+```javascript
+// รัน testDoPost() function
+// เช็ค Execution log และ Spreadsheet
+```
+
+### **2. Test จาก Production:**
 ```bash
-npm run dev
+# สร้างรูปใหม่ใน HotelPlus
+# รอให้ job completed
+# เช็คใน Google Sheets ว่ามีข้อมูลเพิ่มขึ้น
 ```
+
+### **3. Test Manual POST:**
+```bash
+curl -X POST "https://script.google.com/macros/s/YOUR_ID/exec" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jobId": "test-123",
+    "userName": "Test",
+    "userEmail": "test@example.com",
+    "jobType": "text-to-image",
+    "status": "completed",
+    "prompt": "Test prompt",
+    "templateType": "",
+    "outputSize": "x2",
+    "inputCount": 1,
+    "outputCount": 2,
+    "createdAt": "19/1/2026 15:30",
+    "completedAt": "19/1/2026 15:32",
+    "duration": 2,
+    "replicateId": "rep-123",
+    "error": ""
+  }'
+```
+
+---
+
+## 📊 Google Sheets Features
+
+### **Auto-Header Formatting:**
+- สีน้ำเงิน (#3399ff)
+- ตัวหนา, ตัวอักษรสีขาว
+- Freeze row แรก (ติดด้านบน)
+
+### **Auto-append:**
+- ข้อมูลใหม่ต่อท้ายอัตโนมัติ
+- เรียงตามเวลาที่ส่งมา
+
+---
+
+## 🔒 Security
+
+- Apps Script run with your permissions
+- "Anyone" access = ไม่ต้อง auth
+- เฉพาะ POST requests เท่านั้น (ไม่มี GET)
+- ทำงานเฉพาะ Spreadsheet ที่เปิด Apps Script
+
+---
+
+**🎉 เสร็จแล้ว! ระบบจะ export อัตโนมัติทุกครั้งที่มี job เสร็จสิ้น**
 
 ---
 

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
 import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
-import { getSheetsClient } from '@/lib/google-sheets'
 import crypto from 'crypto'
 
 // Create Supabase client with service role key for admin operations
@@ -19,20 +18,14 @@ const supabaseAdmin = createClient(
 
 // Auto-export job to Google Sheets
 async function exportJobToSheets(jobId: string) {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_EXPORT_SPREADSHEET_ID
+  const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL
   
-  if (!spreadsheetId) {
-    console.log('⚠️ GOOGLE_SHEETS_EXPORT_SPREADSHEET_ID not configured, skipping export')
+  if (!webhookUrl) {
+    console.log('⚠️ GOOGLE_SHEETS_WEBHOOK_URL not configured, skipping export')
     return
   }
 
   try {
-    const sheets = getSheetsClient()
-    if (!sheets) {
-      console.log('⚠️ Google Sheets client not available')
-      return
-    }
-
     // Fetch the completed job
     const { data: job, error: jobError } = await supabaseAdmin
       .from('jobs')
@@ -51,35 +44,34 @@ async function exportJobToSheets(jobId: string) {
       ? Math.round((completedAt.getTime() - createdAt.getTime()) / 60000) 
       : null
 
-    const rowData = [
-      job.id,
-      job.user_name || '',
-      job.user_email || '',
-      job.job_type || '',
-      job.status || '',
-      job.prompt || '',
-      job.template_type || '',
-      job.output_size || '',
-      (job.image_urls || []).length,
-      (job.output_urls || []).length,
-      createdAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
-      completedAt ? completedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
-      duration || '',
-      job.replicate_id || '',
-      job.error || ''
-    ]
-
-    // Append row to sheet
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: 'Jobs Export!A:O',
-      valueInputOption: 'RAW',
-      requestBody: {
-        values: [rowData]
-      }
+    // Send data to Apps Script
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: job.id,
+        userName: job.user_name || '',
+        userEmail: job.user_email || '',
+        jobType: job.job_type || '',
+        status: job.status || '',
+        prompt: job.prompt || '',
+        templateType: job.template_type || '',
+        outputSize: job.output_size || '',
+        inputCount: (job.image_urls || []).length,
+        outputCount: (job.output_urls || []).length,
+        createdAt: createdAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+        completedAt: completedAt ? completedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
+        duration: duration || '',
+        replicateId: job.replicate_id || '',
+        error: job.error || ''
+      })
     })
 
-    console.log('✅ Exported job to Google Sheets:', jobId)
+    if (response.ok) {
+      console.log('✅ Exported job to Google Sheets:', jobId)
+    } else {
+      console.error('⚠️ Failed to export to Google Sheets:', await response.text())
+    }
   } catch (error) {
     console.error('⚠️ Failed to export to Google Sheets (non-critical):', error)
   }
