@@ -147,7 +147,8 @@ export default function DashboardPage() {
       await fetchJobs()
     }
     checkAuth()
-  }, [router, supabase, fetchJobs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, supabase]) // ✅ เอา fetchJobs ออก
 
   // Real-time subscription
   useEffect(() => {
@@ -174,15 +175,17 @@ export default function DashboardPage() {
     return () => {
       channel.unsubscribe()
     }
-  }, [supabase, fetchJobs, userId, isAdmin])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, userId, isAdmin]) // ✅ เอา fetchJobs ออก
 
-  // Auto-refresh every 5 seconds as fallback
+  // Auto-refresh every 10 seconds as fallback (เพิ่มจาก 5 → 10)
   useEffect(() => {
     const interval = setInterval(() => {
       fetchJobs(false)
-    }, 5000)
+    }, 10000) // ✅ เพิ่มเป็น 10 วินาที
     return () => clearInterval(interval)
-  }, [fetchJobs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // ✅ เอา fetchJobs ออก
 
   function getStatusColor(status: string): string {
     switch (status) {
