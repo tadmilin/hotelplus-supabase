@@ -339,25 +339,22 @@ export default function CustomPromptPage() {
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
         setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name} (${fileSizeMB}MB)...`)
 
-        // Check file size limit (50MB max)
-        if (file.size > 50 * 1024 * 1024) {
-          alert(`❌ ไฟล์ ${file.name} ใหญ่เกินไป (${fileSizeMB}MB)\nขนาดสูงสุด 50MB`)
-          continue
-        }
+        // ✅ ไม่มีข้อจำกัดขนาดไฟล์ - อัพโหลดได้ทุกขนาด!
+        // แต่จะบีบอัดอัตโนมัติถ้าใหญ่เกิน 10MB
 
-        // Compress if file is larger than 5MB to fit in Vercel limit
+        // Compress if file is larger than 10MB to optimize performance
         let fileToUpload = file
         const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
                        file.name.toLowerCase().endsWith('.heic') || 
                        file.name.toLowerCase().endsWith('.heif')
         
-        if (file.size > 5 * 1024 * 1024 && !isHEIC) {
+        if (file.size > 10 * 1024 * 1024 && !isHEIC) {
           setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB)...`)
           
           try {
             const options = {
-              maxSizeMB: 5,
-              maxWidthOrHeight: 2048,
+              maxSizeMB: 10,
+              maxWidthOrHeight: 3840, // 4K resolution
               useWebWorker: true,
               fileType: 'image/jpeg' as const,
             }
@@ -911,7 +908,7 @@ export default function CustomPromptPage() {
                     📤 หรืออัพโหลดจากเครื่อง
                   </label>
                   <span className="text-xs text-orange-600">
-                    JPG, PNG, WebP (สูงสุด 10MB/ไฟล์)
+                    JPG, PNG, WebP, HEIC (ไม่จำกัดขนาด - บีบอัดอัตโนมัติ)
                   </span>
                 </div>
                 <input
@@ -1124,26 +1121,21 @@ export default function CustomPromptPage() {
                           const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
                           setStatus(`📤 กำลังอัพโหลด Template: ${file.name} (${fileSizeMB}MB)...`)
 
-                          // Check file size limit (50MB max)
-                          if (file.size > 50 * 1024 * 1024) {
-                            alert(`❌ ไฟล์ Template ใหญ่เกินไป (${fileSizeMB}MB)\nขนาดสูงสุด 50MB`)
-                            setUploadingFiles(false)
-                            return
-                          }
+                          // ✅ ไม่มีข้อจำกัดขนาดไฟล์ - อัพโหลด Template ได้ทุกขนาด!
                           
-                          // Compress if file is larger than 5MB
+                          // Compress if file is larger than 10MB
                           let fileToUpload = file
                           const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
                                          file.name.toLowerCase().endsWith('.heic') || 
                                          file.name.toLowerCase().endsWith('.heif')
                           
-                          if (file.size > 5 * 1024 * 1024 && !isHEIC) {
+                          if (file.size > 10 * 1024 * 1024 && !isHEIC) {
                             setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
                             
                             try {
                               const options = {
-                                maxSizeMB: 5,
-                                maxWidthOrHeight: 2048,
+                                maxSizeMB: 10,
+                                maxWidthOrHeight: 3840, // 4K resolution
                                 useWebWorker: true,
                                 fileType: 'image/jpeg' as const,
                               }
