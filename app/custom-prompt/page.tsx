@@ -238,8 +238,8 @@ export default function CustomPromptPage() {
         }))
         setDriveFolders(filteredDrives)
         
-        // Count images in all folders
-        await countImagesInFolders(filteredDrives)
+        // ⚡ ข้าม count images - ให้แสดงเลขตอนโหลดจริง (เร็วขึ้นมาก)
+        // await countImagesInFolders(filteredDrives)
         
         setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
         setTimeout(() => setStatus(''), 3000)
@@ -309,7 +309,14 @@ export default function CustomPromptPage() {
         const data = await res.json()
         setDriveImages(data.images || [])
         setDisplayedImages((data.images || []).slice(0, 100)) // 🚀 โชว์ 100 รูปก่อน
-        setStatus(`✅ โหลด ${data.images.length} รูป`)
+        
+        // ⚡ อัพเดทจำนวนรูปในโฟลเดอร์นี้
+        setImageCounts(prev => ({
+          ...prev,
+          [selectedFolderId]: data.images.length
+        }))
+        
+        setStatus(`✅ โหลด ${data.images.length} รูป${data.cached ? ' (จาก cache)' : ''}`)
         setTimeout(() => setStatus(''), 3000)
       } else {
         alert('Failed to load images')
