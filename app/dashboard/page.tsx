@@ -27,6 +27,51 @@ interface Job {
   _originalCount?: number  // จำนวนรูปต้นฉบับก่อนรวม upscale
 }
 
+// Helper: แปลง Drive URL → Cached Cloudinary URL
+async function getCachedUrl(url: string): Promise<string> {
+  // ถ้าเป็น Cloudinary อยู่แล้ว → ใช้เลย
+  if (url.includes('cloudinary.com') || url.includes('res.cloudinary.com')) {
+    return url
+  }
+  
+  // ถ้าเป็น Drive URL → ดึง fileId แล้วขอ cached URL
+  if (url.includes('drive.google.com') || url.includes('googleusercontent.com')) {
+    try {
+      // Extract fileId from Drive URL
+      let fileId: string | null = null
+      const fileName = 'unknown'
+      
+      if (url.includes('/file/d/')) {
+        fileId = url.split('/file/d/')[1]?.split('/')[0]
+      } else if (url.includes('id=')) {
+        fileId = url.split('id=')[1]?.split('&')[0]
+      }
+      
+      if (!fileId) {
+        console.warn('Could not extract fileId from Drive URL:', url)
+        return url // fallback
+      }
+      
+      // Call cache API
+      const response = await fetch(`/api/drive/get-cached-url?fileId=${fileId}&fileName=${encodeURIComponent(fileName)}`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        return data.url
+      } else {
+        console.error('Failed to get cached URL:', response.statusText)
+        return url // fallback
+      }
+    } catch (error) {
+      console.error('Error getting cached URL:', error)
+      return url // fallback
+    }
+  }
+  
+  // ไม่ใช่ Drive URL → ใช้ตัวเดิม
+  return url
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -38,6 +83,7 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [cachedUrls, setCachedUrls] = useState<Map<string, string>>(new Map()) // URL cache
 
   const fetchJobs = useCallback(async (showLoadingSpinner = true) => {
     if (showLoadingSpinner) setLoading(true)
@@ -186,6 +232,23 @@ export default function DashboardPage() {
       return `${seconds} วินาที`
     }
   }
+  
+  // Helper: Get optimized image URL (with caching)
+  async function getOptimizedUrl(url: string): Promise<string> {
+    // Check cache first
+    if (cachedUrls.has(url)) {
+      return cachedUrls.get(url)!
+    }
+    
+    // Get cached URL
+    const optimizedUrl = await getCachedUrl(url)
+    
+    // Store in cache
+    setCachedUrls(prev => new Map(prev).set(url, optimizedUrl))
+    
+    return optimizedUrl
+  }
+
   async function handleViewImages(job: Job) {
     try {
       // ดึง upscale jobs ที่เกี่ยวข้อง
@@ -254,6 +317,47 @@ export default function DashboardPage() {
     } finally {
       setDeleting(null)
     }
+  }
+
+  // Component: Optimized Image with caching
+  function OptimizedImage({ url, alt, className }: { url: string, alt: string, className?: string }) {
+    const [displayUrl, setDisplayUrl] = useState(url)
+    const [imgLoading, setImgLoading] = useState(true)
+
+    useEffect(() => {
+      async function loadUrl() {
+        setImgLoading(true)
+        const optimized = await getOptimizedUrl(url)
+        setDisplayUrl(optimized)
+        setImgLoading(false)
+      }
+      loadUrl()
+    }, [url])
+
+    // Show loading state
+    if (imgLoading) {
+      return (
+        <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
+          <span className="text-gray-400 text-sm">⏳</span>
+        </div>
+      )
+    }
+
+    // Optimize Cloudinary URLs
+    const finalUrl = displayUrl.includes('cloudinary.com')
+      ? displayUrl.replace('/upload/', '/upload/f_auto,q_70,w_400,c_fill,fl_progressive/')
+      : displayUrl
+
+    return (
+      <Image
+        src={finalUrl}
+        alt={alt}
+        fill
+        className={`object-cover ${className || ''}`}
+        loading="lazy"
+        unoptimized
+      />
+    )
   }
 
   if (loading) {
@@ -334,16 +438,9 @@ export default function DashboardPage() {
                 {/* Thumbnail */}
                 <div className="aspect-square bg-gray-100 relative">
                   {job.output_urls && job.output_urls.length > 0 && job.output_urls[0] ? (
-                    <Image
-                      src={job.output_urls[0].includes('cloudinary.com') 
-                        ? job.output_urls[0].replace('/upload/', '/upload/f_auto,q_70,w_400,c_fill,fl_progressive/') 
-                        : job.output_urls[0]}
+                    <OptimizedImage
+                      url={job.output_urls[0]}
                       alt="Output"
-                      fill
-                      className="object-cover"
-                      loading="lazy"
-                      unoptimized
-                      priority={false}
                     />
                   ) : job.image_urls && job.image_urls.length > 0 && job.image_urls[0] ? (
                     <div className="relative w-full h-full">
