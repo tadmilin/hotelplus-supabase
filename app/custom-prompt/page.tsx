@@ -23,6 +23,7 @@ export default function CustomPromptPage() {
   const [driveFolders, setDriveFolders] = useState<Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>>([])
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
+  const [displayedImages, setDisplayedImages] = useState<DriveImage[]>([]) // 🚀 แสดงทีละน้อย
   const [selectedImagesMap, setSelectedImagesMap] = useState<Map<string, DriveImage>>(new Map())
   const [imageCounts, setImageCounts] = useState<Record<string, number>>({})
   const [customPrompt, setCustomPrompt] = useState('')
@@ -307,6 +308,7 @@ export default function CustomPromptPage() {
       if (res.ok) {
         const data = await res.json()
         setDriveImages(data.images || [])
+        setDisplayedImages((data.images || []).slice(0, 100)) // 🚀 โชว์ 100 รูปก่อน
         setStatus(`✅ โหลด ${data.images.length} รูป`)
         setTimeout(() => setStatus(''), 3000)
       } else {
@@ -908,7 +910,7 @@ export default function CustomPromptPage() {
                   รูปในโฟลเดอร์ ({driveImages.length} รูป)
                 </h3>
                 <div className="grid grid-cols-4 gap-3 max-h-96 overflow-y-auto">
-                  {driveImages.map((img) => {
+                  {displayedImages.map((img) => {
                     const isSelected = selectedImagesMap.has(img.id)
                     return (
                       <div
@@ -924,8 +926,8 @@ export default function CustomPromptPage() {
                           src={img.thumbnailUrl}
                           alt={img.name}
                           fill
+                          sizes="(max-width: 768px) 50vw, 25vw"
                           className="object-cover"
-                          unoptimized
                         />
                         {isSelected && (
                           <div className="absolute inset-0 bg-purple-600/30 flex items-center justify-center">
@@ -936,6 +938,19 @@ export default function CustomPromptPage() {
                     )
                   })}
                 </div>
+                
+                {/* Load More Button */}
+                {displayedImages.length < driveImages.length && (
+                  <button
+                    onClick={() => setDisplayedImages(prev => [
+                      ...prev,
+                      ...driveImages.slice(prev.length, prev.length + 100)
+                    ])}
+                    className="mt-4 w-full px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-lg font-semibold transition-all"
+                  >
+                    📥 โหลดเพิ่ม ({driveImages.length - displayedImages.length} รูปเหลือ)
+                  </button>
+                )}
               </div>
             )}
 
@@ -961,8 +976,8 @@ export default function CustomPromptPage() {
                           src={img.thumbnailUrl}
                           alt={img.name}
                           fill
+                          sizes="(max-width: 768px) 50vw, 25vw"
                           className="object-cover"
-                          unoptimized
                         />
                       </div>
                       <button
@@ -1174,8 +1189,8 @@ export default function CustomPromptPage() {
                               src={img.thumbnailUrl}
                               alt={img.name}
                               fill
+                              sizes="(max-width: 768px) 50vw, 25vw"
                               className="object-cover"
-                              unoptimized
                             />
                           </div>
                         ))}

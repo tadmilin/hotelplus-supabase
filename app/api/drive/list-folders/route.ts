@@ -108,7 +108,18 @@ export async function GET() {
 
 type FolderStructure = { id: string; name: string; children: FolderStructure[] }
 
-async function getFolderStructure(drive: drive_v3.Drive, driveId: string, parentId?: string): Promise<FolderStructure[]> {
+async function getFolderStructure(
+  drive: drive_v3.Drive, 
+  driveId: string, 
+  parentId?: string,
+  depth: number = 0
+): Promise<FolderStructure[]> {
+  // 🚀 จำกัดความลึกไม่เกิน 3 ชั้น (ป้องกัน recursion ระเบิด)
+  if (depth >= 3) {
+    console.log(`⚠️ Depth limit reached at ${depth} for ${driveId}`)
+    return []
+  }
+
   try {
     // Check if this is a Shared Drive or a regular folder
     const isSharedDrive = driveId !== 'my-drive' && !driveId.startsWith('1')
@@ -147,9 +158,10 @@ async function getFolderStructure(drive: drive_v3.Drive, driveId: string, parent
     const response = await drive.files.list(listOptions)
     const folders = response.data.files || []
     
+    // ⚡ Recursion แต่จำกัดความลึก
     const result = []
     for (const folder of folders) {
-      const children = await getFolderStructure(drive, driveId, folder.id!)
+      const children = await getFolderStructure(drive, driveId, folder.id!, depth + 1)
       result.push({
         id: folder.id!,
         name: folder.name!,

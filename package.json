@@ -20,6 +20,7 @@
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-window": "^2.2.5",
     "replicate": "^1.4.0",
     "sharp": "^0.34.5"
   },
