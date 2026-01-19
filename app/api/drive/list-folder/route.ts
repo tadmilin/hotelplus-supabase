@@ -15,17 +15,18 @@ export async function POST(req: NextRequest) {
        return NextResponse.json({ error: 'Google Drive not configured' }, { status: 503 })
     }
 
-    // List images in folder
+    // List images in folder (with pagination support)
     const response = await drive.files.list({
       q: `'${folderId}' in parents and (mimeType contains 'image/') and trashed=false`,
-      fields: 'files(id, name, mimeType, thumbnailLink, webContentLink)',
+      fields: 'files(id, name, mimeType, thumbnailLink, webContentLink), nextPageToken',
       includeItemsFromAllDrives: true,
       supportsAllDrives: true,
-      pageSize: 50,
+      pageSize: 1000, // 🚀 MAX ของ Drive API (1000 รูป/ครั้ง)
       orderBy: 'createdTime desc',
     })
 
     const files = response.data.files || []
+    const nextPageToken = response.data.nextPageToken
 
     const images = files.map((file: any) => ({
       id: file.id!,
@@ -34,7 +35,11 @@ export async function POST(req: NextRequest) {
       url: file.webContentLink || '',
     }))
 
-    return NextResponse.json({ images })
+    return NextResponse.json({ 
+      images,
+      nextPageToken, // สำหรับ pagination ในอนาคต
+      total: images.length
+    })
   } catch (error) {
     console.error('Error listing folder:', error)
     return NextResponse.json(
