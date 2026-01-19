@@ -89,11 +89,10 @@ export default function DashboardPage() {
     if (showLoadingSpinner) setLoading(true)
     
     try {
-      // ดึง jobs ทั้งหมดไม่จำกัด (ยกเว้น upscale)
+      // ดึง jobs ทั้งหมด
       let query = supabase
         .from('jobs')
         .select('*')
-        .neq('job_type', 'upscale')  // ← ซ่อน job upscale
         .order('created_at', { ascending: false })
       
       // ถ้าไม่ใช่ admin ดึงแค่งานของตัวเอง
@@ -104,7 +103,16 @@ export default function DashboardPage() {
       const { data, error } = await query
 
       if (error) throw error
-      setJobs(data || [])
+      
+      // 🔥 กรองออกเฉพาะ auto-upscale (ที่มี "from job" ใน prompt)
+      // แต่เก็บ manual upscale ไว้แสดง
+      const filteredJobs = (data || []).filter(job => {
+        if (job.job_type !== 'upscale') return true // เก็บ job ธรรมดา
+        // upscale job: เก็บเฉพาะ manual (ไม่มี "from job")
+        return !job.prompt?.includes('from job')
+      })
+      
+      setJobs(filteredJobs)
     } catch (error) {
       console.error('Error fetching jobs:', error)
     } finally {

@@ -270,6 +270,7 @@ export async function POST(req: NextRequest) {
                 prompt: `Auto-upscale x2 from job ${job.id}`,
                 output_size: 'x2',
                 image_urls: [outputUrl],
+                input_image_url: outputUrl, // 🔥 เพื่อแสดงรูป before ใน Dashboard
                 output_urls: [],
               })
               .select()

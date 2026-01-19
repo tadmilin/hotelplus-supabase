@@ -101,6 +101,7 @@ export default function UpscalePage() {
           prompt: `Upscale x${scale}`,
           output_size: `x${scale}`,
           image_urls: [imageUrl],
+          input_image_url: imageUrl, // 🔥 เพิ่มเพื่อแสดงรูป before ใน Dashboard
           output_urls: [],
         })
         .select()
