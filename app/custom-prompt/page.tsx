@@ -48,6 +48,9 @@ export default function CustomPromptPage() {
   const [templateFolderId, setTemplateFolderId] = useState('')
   const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  
+  // 🔍 Search state
+  const [folderSearch, setFolderSearch] = useState('')
 
   useEffect(() => {
     async function checkAuth() {
@@ -252,40 +255,6 @@ export default function CustomPromptPage() {
     } finally {
       clearInterval(timerInterval)
       setIsLoadingFolders(false)
-    }
-  }
-
-  async function countImagesInFolders(drives: Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>) {
-    // Collect all folder IDs
-    const folderIds: string[] = []
-    
-    function collectFolderIds(folders: TreeFolder[]) {
-      for (const folder of folders) {
-        folderIds.push(folder.id)
-        if (folder.children && folder.children.length > 0) {
-          collectFolderIds(folder.children)
-        }
-      }
-    }
-    
-    drives.forEach(drive => collectFolderIds(drive.folders))
-    
-    if (folderIds.length === 0) return
-    
-    try {
-      setStatus('🔢 กำลังนับจำนวนรูปในแต่ละโฟลเดอร์...')
-      const res = await fetch('/api/drive/count-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderIds }),
-      })
-      
-      if (res.ok) {
-        const data = await res.json()
-        setImageCounts(data.counts || {})
-      }
-    } catch (error) {
-      console.error('Error counting images:', error)
     }
   }
 
@@ -843,41 +812,70 @@ export default function CustomPromptPage() {
                 </button>
               </div>
               
-              {driveFolders.map((drive) => (
-                <div key={drive.driveId} className="mb-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                      <span>📱</span>
-                      <span>{drive.driveName}</span>
-                    </h3>
-                    <button
-                      onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
-                      title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                  <FolderTree
-                    folders={drive.folders}
-                    onSelectFolder={setSelectedFolderId}
-                    selectedFolderId={selectedFolderId}
-                    imageCounts={imageCounts}
-                    onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                    driveId={drive.driveId}
-                  />
-                </div>
-              ))}
+              {/* 🔍 Search Box */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  value={folderSearch}
+                  onChange={(e) => setFolderSearch(e.target.value)}
+                  placeholder="🔍 ค้นหาโฟลเดอร์... (พิมพ์ชื่อ)"
+                  className="w-full px-4 py-2 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none"
+                />
+                {folderSearch && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    กรองโฟลเดอร์ที่มี &ldquo;{folderSearch}&rdquo;
+                  </p>
+                )}
+              </div>
 
+              {/* 📂 Load Button - ย้ายมาด้านบน */}
               {selectedFolderId && (
                 <button
                   onClick={loadDriveImages}
                   disabled={loading}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                  className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-4 flex items-center justify-center gap-2"
                 >
-                  📂 โหลดรูปจากโฟลเดอร์
+                  <span>{loading ? '⏳' : '📂'}</span>
+                  <span>{loading ? 'กำลังโหลด...' : 'โหลดรูปจากโฟลเดอร์'}</span>
                 </button>
               )}
+              
+              {/* 📁 Folder Tree - เพิ่ม scroll */}
+              <div className="max-h-96 overflow-y-auto pr-2">
+                {driveFolders
+                  .filter(drive => {
+                    if (!folderSearch) return true
+                    // กรองทั้ง drive name และ folder name
+                    const searchLower = folderSearch.toLowerCase()
+                    return drive.driveName.toLowerCase().includes(searchLower) ||
+                      JSON.stringify(drive.folders).toLowerCase().includes(searchLower)
+                  })
+                  .map((drive) => (
+                  <div key={drive.driveId} className="mb-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <span>📱</span>
+                        <span>{drive.driveName}</span>
+                      </h3>
+                      <button
+                        onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
+                        title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                    <FolderTree
+                      folders={drive.folders}
+                      onSelectFolder={setSelectedFolderId}
+                      selectedFolderId={selectedFolderId}
+                      imageCounts={imageCounts}
+                      onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                      driveId={drive.driveId}
+                    />
+                  </div>
+                ))}
+              </div>
 
               {/* Upload from Computer */}
               <div className="mt-4 p-4 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-lg border-2 border-orange-200">
