@@ -215,6 +215,32 @@ export default function CustomPromptPage() {
       }))
   }
 
+  // 🔍 ฟังก์ชันกรองโฟลเดอร์ตามคำค้นหา (exact substring match)
+  function filterFoldersBySearch(folders: TreeFolder[], searchTerm: string): TreeFolder[] {
+    if (!searchTerm) return folders
+    
+    const searchLower = searchTerm.toLowerCase()
+    const filtered: TreeFolder[] = []
+    
+    for (const folder of folders) {
+      // ✅ ตรวจสอบว่าชื่อโฟลเดอร์มีคำค้นหาหรือไม่ (exact substring)
+      const nameMatch = folder.name.toLowerCase().includes(searchLower)
+      
+      // ตรวจสอบ children ด้วย
+      const filteredChildren = folder.children ? filterFoldersBySearch(folder.children, searchTerm) : []
+      
+      // ถ้าชื่อตรง หรือมี children ที่ตรง → เอาไว้
+      if (nameMatch || filteredChildren.length > 0) {
+        filtered.push({
+          ...folder,
+          children: filteredChildren
+        })
+      }
+    }
+    
+    return filtered
+  }
+
   async function fetchDriveFolders() {
     setIsLoadingFolders(true)
     setLoadingTimer(0)
@@ -843,38 +869,39 @@ export default function CustomPromptPage() {
               {/* 📁 Folder Tree - เพิ่ม scroll */}
               <div className="max-h-96 overflow-y-auto pr-2">
                 {driveFolders
-                  .filter(drive => {
-                    if (!folderSearch) return true
-                    // กรองทั้ง drive name และ folder name
-                    const searchLower = folderSearch.toLowerCase()
-                    return drive.driveName.toLowerCase().includes(searchLower) ||
-                      JSON.stringify(drive.folders).toLowerCase().includes(searchLower)
-                  })
-                  .map((drive) => (
-                  <div key={drive.driveId} className="mb-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                        <span>📱</span>
-                        <span>{drive.driveName}</span>
-                      </h3>
-                      <button
-                        onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
-                        title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                    <FolderTree
-                      folders={drive.folders}
-                      onSelectFolder={setSelectedFolderId}
-                      selectedFolderId={selectedFolderId}
-                      imageCounts={imageCounts}
-                      onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                      driveId={drive.driveId}
-                    />
-                  </div>
-                ))}
+                  .map((drive) => {
+                    // 🔍 กรองโฟลเดอร์ตามคำค้นหา
+                    const filteredFolders = filterFoldersBySearch(drive.folders, folderSearch)
+                    
+                    // ถ้าไม่มีโฟลเดอร์ที่ตรงเงื่อนไข ไม่แสดง drive นี้
+                    if (folderSearch && filteredFolders.length === 0) return null
+                    
+                    return (
+                      <div key={drive.driveId} className="mb-6">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <span>📱</span>
+                            <span>{drive.driveName}</span>
+                          </h3>
+                          <button
+                            onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
+                            title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                        <FolderTree
+                          folders={filteredFolders}
+                          onSelectFolder={setSelectedFolderId}
+                          selectedFolderId={selectedFolderId}
+                          imageCounts={imageCounts}
+                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                          driveId={drive.driveId}
+                        />
+                      </div>
+                    )
+                  })}
               </div>
 
               {/* Upload from Computer */}
