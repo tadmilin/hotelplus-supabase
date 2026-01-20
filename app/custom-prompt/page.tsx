@@ -47,38 +47,12 @@ export default function CustomPromptPage() {
   const [enableTemplate, setEnableTemplate] = useState(false)
   const [templateFolderId, setTemplateFolderId] = useState('')
   const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
-  const [displayedTemplateImages, setDisplayedTemplateImages] = useState<DriveImage[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [templateSearch, setTemplateSearch] = useState('')
   const [loadingTemplates, setLoadingTemplates] = useState(false)
   
   // 🔍 Search state
   const [folderSearch, setFolderSearch] = useState('')
-
-  // 🚀 Lazy load template images
-  useEffect(() => {
-    if (templateImages.length === 0) {
-      setDisplayedTemplateImages([])
-      return
-    }
-
-    let filtered = templateImages
-    if (templateSearch.trim()) {
-      const searchLower = templateSearch.toLowerCase()
-      filtered = templateImages.filter(img => 
-        img.name.toLowerCase().includes(searchLower)
-      )
-    }
-
-    setDisplayedTemplateImages(filtered.slice(0, 50))
-
-    if (filtered.length > 50) {
-      const timer = setTimeout(() => {
-        setDisplayedTemplateImages(filtered)
-      }, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [templateImages, templateSearch])
 
   useEffect(() => {
     async function checkAuth() {
@@ -1134,9 +1108,14 @@ export default function CustomPromptPage() {
                           type="text"
                           value={templateSearch}
                           onChange={(e) => setTemplateSearch(e.target.value)}
-                          placeholder="🔍 ค้นหาชื่อ template..."
+                          placeholder="🔍 ค้นหาโฟลเดอร์ template... (พิมพ์ชื่อ)"
                           className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
                         />
+                        {templateSearch && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            กรองโฟลเดอร์ที่มี &ldquo;{templateSearch}&rdquo;
+                          </p>
+                        )}
                       </div>
 
                       {/* Load Button */}
@@ -1153,20 +1132,28 @@ export default function CustomPromptPage() {
 
                       {/* Folder Tree */}
                       <div className="max-h-64 overflow-y-auto pr-2">
-                        {driveFolders.map((drive) => (
-                          <div key={`template-${drive.driveId}`} className="mb-4">
-                            <h5 className="text-xs font-semibold text-blue-700 mb-2">
-                              🎨 {drive.driveName}
-                            </h5>
-                            <FolderTree
-                              folders={drive.folders}
-                              onSelectFolder={setTemplateFolderId}
-                              selectedFolderId={templateFolderId}
-                              onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                              driveId={drive.driveId}
-                            />
-                          </div>
-                        ))}
+                        {driveFolders.map((drive) => {
+                          // 🔍 กรองโฟลเดอร์ตามคำค้นหา
+                          const filteredFolders = filterFoldersBySearch(drive.folders, templateSearch)
+                          
+                          // ถ้าไม่มีโฟลเดอร์ที่ตรงเงื่อนไข ไม่แสดง drive นี้
+                          if (templateSearch && filteredFolders.length === 0) return null
+                          
+                          return (
+                            <div key={`template-${drive.driveId}`} className="mb-4">
+                              <h5 className="text-xs font-semibold text-blue-700 mb-2">
+                                🎨 {drive.driveName}
+                              </h5>
+                              <FolderTree
+                                folders={filteredFolders}
+                                onSelectFolder={setTemplateFolderId}
+                                selectedFolderId={templateFolderId}
+                                onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                                driveId={drive.driveId}
+                              />
+                            </div>
+                          )
+                        })}
                       </div>
 
                       {/* Upload Template Button */}
@@ -1255,7 +1242,7 @@ export default function CustomPromptPage() {
                           🎨 Template ที่มี ({templateImages.length} รูป)
                         </h4>
                         <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
-                          {displayedTemplateImages.map((img) => (
+                          {templateImages.map((img) => (
                             <div
                               key={img.id}
                               onClick={() => setSelectedTemplate(img.url)}
