@@ -50,6 +50,7 @@ export default function CustomPromptPage() {
   const [displayedTemplateImages, setDisplayedTemplateImages] = useState<DriveImage[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [templateSearch, setTemplateSearch] = useState('')
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
   
   // 🔍 Search state
   const [folderSearch, setFolderSearch] = useState('')
@@ -456,6 +457,7 @@ export default function CustomPromptPage() {
       return
     }
 
+    setLoadingTemplates(true)
     try {
       const res = await fetch('/api/drive/list-folder', {
         method: 'POST',
@@ -466,12 +468,15 @@ export default function CustomPromptPage() {
       if (res.ok) {
         const data = await res.json()
         setTemplateImages(data.images || [])
+        console.log(`✅ Loaded ${data.images?.length || 0} template images`)
       } else {
-        alert('Failed to load templates')
+        alert('ไม่สามารถโหลด Template ได้')
       }
     } catch (error) {
-      console.error('Error loading templates:', error)
-      alert('Error loading templates')
+      console.error('Load template error:', error)
+      alert('เกิดข้อผิดพลาดในการโหลด Template')
+    } finally {
+      setLoadingTemplates(false)
     }
   }
 
@@ -1138,11 +1143,11 @@ export default function CustomPromptPage() {
                       {templateFolderId && (
                         <button
                           onClick={loadTemplateImages}
-                          disabled={loading}
+                          disabled={loadingTemplates}
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-3 flex items-center justify-center gap-2 text-sm"
                         >
-                          <span>{loading ? '⏳' : '📂'}</span>
-                          <span>{loading ? 'กำลังโหลด...' : 'โหลด Template จากโฟลเดอร์'}</span>
+                          <span>{loadingTemplates ? '⏳' : '📂'}</span>
+                          <span>{loadingTemplates ? 'กำลังโหลด...' : 'โหลด Template จากโฟลเดอร์'}</span>
                         </button>
                       )}
 
