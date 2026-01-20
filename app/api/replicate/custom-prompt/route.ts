@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
         prompt: finalPrompt,
         aspect_ratio: outputSize || 'match_input_image',
         output_format: 'png',
-        resolution: '1K',
+        resolution: '2K', // 🔥 เพิ่มเป็น 2K เพื่อให้หน้าคนชัดขึ้น detect ได้ดีขึ้น
       }
 
       const prediction = await replicate.predictions.create({
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       prompt: prompt,
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
-      resolution: '1K',
+      resolution: '2K', // 🔥 เพิ่มเป็น 2K เพื่อให้หน้าคนชัดขึ้น detect ได้ดีขึ้น
     }
 
     const prediction = await replicate.predictions.create({
