@@ -47,10 +47,37 @@ export default function CustomPromptPage() {
   const [enableTemplate, setEnableTemplate] = useState(false)
   const [templateFolderId, setTemplateFolderId] = useState('')
   const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
+  const [displayedTemplateImages, setDisplayedTemplateImages] = useState<DriveImage[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [templateSearch, setTemplateSearch] = useState('')
   
   // 🔍 Search state
   const [folderSearch, setFolderSearch] = useState('')
+
+  // 🚀 Lazy load template images
+  useEffect(() => {
+    if (templateImages.length === 0) {
+      setDisplayedTemplateImages([])
+      return
+    }
+
+    let filtered = templateImages
+    if (templateSearch.trim()) {
+      const searchLower = templateSearch.toLowerCase()
+      filtered = templateImages.filter(img => 
+        img.name.toLowerCase().includes(searchLower)
+      )
+    }
+
+    setDisplayedTemplateImages(filtered.slice(0, 50))
+
+    if (filtered.length > 50) {
+      const timer = setTimeout(() => {
+        setDisplayedTemplateImages(filtered)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [templateImages, templateSearch])
 
   useEffect(() => {
     async function checkAuth() {
@@ -1089,141 +1116,172 @@ export default function CustomPromptPage() {
 
                 {enableTemplate && (
                   <div className="space-y-4">
-                    {/* Template Folders */}
-                    {driveFolders.map((drive) => (
-                      <div key={`template-${drive.driveId}`}>
-                        <h4 className="text-xs font-semibold text-blue-700 mb-2">
-                          🎨 {drive.driveName}
-                        </h4>
-                        <FolderTree
-                          folders={drive.folders}
-                          onSelectFolder={setTemplateFolderId}
-                          selectedFolderId={templateFolderId}
-                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                          driveId={drive.driveId}
+                    {/* Folder Tree Section */}
+                    <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg p-4 border-2 border-blue-200">
+                      <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                        <span>📁</span>
+                        <span>เลือกโฟลเดอร์ Template</span>
+                      </h4>
+                      
+                      {/* Search Folders */}
+                      <div className="mb-3">
+                        <input
+                          type="text"
+                          value={templateSearch}
+                          onChange={(e) => setTemplateSearch(e.target.value)}
+                          placeholder="🔍 ค้นหาชื่อ template..."
+                          className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
-                    ))}
 
-                    {/* Upload Template */}
-                    <div className="p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
-                      <input
-                        type="file"
-                        id="template-upload"
-                        accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-                        onChange={async (e) => {
-                          const files = e.target.files
-                          if (!files || files.length === 0) return
-                          
-                          setUploadingFiles(true)
-                          
-                          const file = files[0]
-                          const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
-                          setStatus(`📤 กำลังอัพโหลด Template: ${file.name} (${fileSizeMB}MB)...`)
+                      {/* Load Button */}
+                      {templateFolderId && (
+                        <button
+                          onClick={loadTemplateImages}
+                          disabled={loading}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-3 flex items-center justify-center gap-2 text-sm"
+                        >
+                          <span>{loading ? '⏳' : '📂'}</span>
+                          <span>{loading ? 'กำลังโหลด...' : 'โหลด Template จากโฟลเดอร์'}</span>
+                        </button>
+                      )}
 
-                          // ✅ ไม่มีข้อจำกัดขนาดไฟล์ - อัพโหลด Template ได้ทุกขนาด!
-                          
-                          // Compress if file is larger than 10MB
-                          let fileToUpload = file
-                          const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
-                                         file.name.toLowerCase().endsWith('.heic') || 
-                                         file.name.toLowerCase().endsWith('.heif')
-                          
-                          if (file.size > 10 * 1024 * 1024 && !isHEIC) {
-                            setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
-                            
-                            try {
-                              const options = {
-                                maxSizeMB: 10,
-                                maxWidthOrHeight: 3840, // 4K resolution
-                                useWebWorker: true,
-                                fileType: 'image/jpeg' as const,
-                              }
-                              
-                              fileToUpload = await imageCompression(file, options)
-                              const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
-                              console.log(`✅ Template compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
-                            } catch (err) {
-                              console.error('Failed to compress template:', err)
-                              alert(`⚠️ ไม่สามารถบีบอัด Template ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
-                            }
-                          } else if (isHEIC) {
-                            console.log(`📱 HEIC/HEIF Template detected - server will convert`)
-                            setStatus(`📱 กำลังแปลงไฟล์ iPhone Template...`)
-                          }
-                          
-                          const formData = new FormData()
-                          formData.append('files', fileToUpload)
-
-                          const res = await fetch('/api/upload-images', {
-                            method: 'POST',
-                            body: formData,
-                          })
-
-                          if (res.ok) {
-                            const data = await res.json()
-                            const uploadedTemplate = data.images[0]
-                            // Add to templateImages state so it can be found later
-                            setTemplateImages(prev => [uploadedTemplate, ...prev])
-                            // Auto-select it
-                            setSelectedTemplate(uploadedTemplate.url)
-                            setStatus('✅ อัพโหลด Template สำเร็จ')
-                            setTimeout(() => setStatus(''), 2000)
-                          } else {
-                            setStatus('❌ อัพโหลด Template ล้มเหลว')
-                            setTimeout(() => setStatus(''), 3000)
-                          }
-                          
-                          setUploadingFiles(false)
-                          e.target.value = ''
-                        }}
-                        className="hidden"
-                      />
-                      <label
-                        htmlFor="template-upload"
-                        className="block w-full text-center px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold cursor-pointer"
-                      >
-                        📁 อัพโหลด Template
-                      </label>
-                    </div>
-
-                    {templateFolderId && (
-                      <button
-                        onClick={loadTemplateImages}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold"
-                      >
-                        โหลด Template
-                      </button>
-                    )}
-
-                    {/* Template Images */}
-                    {templateImages.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2">
-                        {templateImages.map((img) => (
-                          <div
-                            key={img.id}
-                            onClick={() => setSelectedTemplate(img.url)}
-                            className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer ${
-                              selectedTemplate === img.url
-                                ? 'ring-4 ring-blue-500'
-                                : 'ring-2 ring-gray-200'
-                            }`}
-                          >
-                            <Image
-                              src={img.thumbnailUrl}
-                              alt={img.name}
-                              fill
-                              sizes="(max-width: 768px) 50vw, 25vw"
-                              className="object-cover"
+                      {/* Folder Tree */}
+                      <div className="max-h-64 overflow-y-auto pr-2">
+                        {driveFolders.map((drive) => (
+                          <div key={`template-${drive.driveId}`} className="mb-4">
+                            <h5 className="text-xs font-semibold text-blue-700 mb-2">
+                              🎨 {drive.driveName}
+                            </h5>
+                            <FolderTree
+                              folders={drive.folders}
+                              onSelectFolder={setTemplateFolderId}
+                              selectedFolderId={templateFolderId}
+                              onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                              driveId={drive.driveId}
                             />
                           </div>
                         ))}
                       </div>
+
+                      {/* Upload Template Button */}
+                      <div className="mt-3 pt-3 border-t-2 border-blue-200">
+                        <input
+                          type="file"
+                          id="template-upload"
+                          accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                          onChange={async (e) => {
+                            const files = e.target.files
+                            if (!files || files.length === 0) return
+                            
+                            setUploadingFiles(true)
+                            
+                            const file = files[0]
+                            const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+                            setStatus(`📤 กำลังอัพโหลด Template: ${file.name} (${fileSizeMB}MB)...`)
+
+                            let fileToUpload = file
+                            const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                                           file.name.toLowerCase().endsWith('.heic') || 
+                                           file.name.toLowerCase().endsWith('.heif')
+                            
+                            if (file.size > 10 * 1024 * 1024 && !isHEIC) {
+                              setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
+                              
+                              try {
+                                const options = {
+                                  maxSizeMB: 10,
+                                  maxWidthOrHeight: 3840,
+                                  useWebWorker: true,
+                                  fileType: 'image/jpeg' as const,
+                                }
+                                
+                                fileToUpload = await imageCompression(file, options)
+                                const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
+                                console.log(`✅ Template compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+                              } catch (err) {
+                                console.error('Failed to compress template:', err)
+                                alert(`⚠️ ไม่สามารถบีบอัด Template ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
+                              }
+                            }
+                            
+                            const formData = new FormData()
+                            formData.append('files', fileToUpload)
+
+                            const res = await fetch('/api/upload-images', {
+                              method: 'POST',
+                              body: formData,
+                            })
+
+                            if (res.ok) {
+                              const data = await res.json()
+                              const uploadedTemplate = data.images[0]
+                              setTemplateImages(prev => [uploadedTemplate, ...prev])
+                              setSelectedTemplate(uploadedTemplate.url)
+                              setStatus('✅ อัพโหลด Template สำเร็จ')
+                              setTimeout(() => setStatus(''), 2000)
+                            } else {
+                              setStatus('❌ อัพโหลด Template ล้มเหลว')
+                              setTimeout(() => setStatus(''), 3000)
+                            }
+                            
+                            setUploadingFiles(false)
+                            e.target.value = ''
+                          }}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="template-upload"
+                          className={`block w-full text-center px-3 py-2 rounded-lg font-semibold cursor-pointer transition-all text-sm ${
+                            uploadingFiles
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-orange-500 hover:bg-orange-600 text-white'
+                          }`}
+                        >
+                          {uploadingFiles ? '⏳ กำลังอัพโหลด...' : '📤 อัพโหลด Template จากเครื่อง'}
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Template Images Grid */}
+                    {templateImages.length > 0 && (
+                      <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                        <h4 className="text-sm font-semibold text-blue-900 mb-3">
+                          🎨 Template ที่มี ({templateImages.length} รูป)
+                        </h4>
+                        <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
+                          {displayedTemplateImages.map((img) => (
+                            <div
+                              key={img.id}
+                              onClick={() => setSelectedTemplate(img.url)}
+                              className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
+                                selectedTemplate === img.url
+                                  ? 'ring-4 ring-blue-500 scale-95'
+                                  : 'ring-2 ring-gray-200 hover:ring-blue-300'
+                              }`}
+                            >
+                              <Image
+                                src={img.thumbnailUrl}
+                                alt={img.name}
+                                fill
+                                sizes="(max-width: 768px) 50vw, 20vw"
+                                className="object-cover"
+                              />
+                              {selectedTemplate === img.url && (
+                                <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
+                                  <span className="text-4xl">✓</span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
+                    {/* Selected Template Info */}
                     {selectedTemplate && (
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 text-sm text-green-700 bg-green-50 p-2 rounded">
+                        <div className="flex-1 text-sm text-green-700 bg-green-50 p-3 rounded-lg border border-green-200 font-medium">
                           ✅ เลือก Template แล้ว
                         </div>
                         <button
@@ -1231,10 +1289,10 @@ export default function CustomPromptPage() {
                             setSelectedTemplate('')
                             setEnableTemplate(false)
                           }}
-                          className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
+                          className="px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
                           title="ยกเลิก Template"
                         >
-                          🗑️ ลบ
+                          🗑️
                         </button>
                       </div>
                     )}

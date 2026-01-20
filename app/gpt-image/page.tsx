@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
+import Image from 'next/image'
 import { FolderTree, type TreeFolder } from '@/components/FolderTree'
 import imageCompression from 'browser-image-compression'
 
@@ -52,7 +53,39 @@ export default function GptImagePage() {
   // Template Mode (GPT → Nano Banana Pro Pipeline)
   const [useTemplate, setUseTemplate] = useState(false)
   const [templateFile, setTemplateFile] = useState<File | null>(null)
-  const [templatePreview, setTemplatePreview] = useState<string | null>(null)
+  
+  // Template from Google Drive
+  const [templateFolderId, setTemplateFolderId] = useState('')
+  const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
+  const [displayedTemplateImages, setDisplayedTemplateImages] = useState<DriveImage[]>([])
+  const [selectedTemplateUrl, setSelectedTemplateUrl] = useState('')
+  const [templateSearch, setTemplateSearch] = useState('')
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+
+  // 🚀 Lazy load template images
+  useEffect(() => {
+    if (templateImages.length === 0) {
+      setDisplayedTemplateImages([])
+      return
+    }
+
+    let filtered = templateImages
+    if (templateSearch.trim()) {
+      const searchLower = templateSearch.toLowerCase()
+      filtered = templateImages.filter(img => 
+        img.name.toLowerCase().includes(searchLower)
+      )
+    }
+
+    setDisplayedTemplateImages(filtered.slice(0, 50))
+
+    if (filtered.length > 50) {
+      const timer = setTimeout(() => {
+        setDisplayedTemplateImages(filtered)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [templateImages, templateSearch])
 
   useEffect(() => {
     async function checkAuth() {
@@ -162,6 +195,31 @@ export default function GptImagePage() {
       }
     } catch {
       alert('❌ เกิดข้อผิดพลาด')
+    }
+  }
+
+  async function loadTemplateImages() {
+    if (!templateFolderId) return
+    
+    setLoadingTemplates(true)
+    try {
+      const res = await fetch('/api/drive/list-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: templateFolderId }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setTemplateImages(data.images || [])
+      } else {
+        alert('ไม่สามารถโหลด Template ได้')
+      }
+    } catch (err) {
+      console.error('Load template error:', err)
+      alert('เกิดข้อผิดพลาดในการโหลด Template')
+    } finally {
+      setLoadingTemplates(false)
     }
   }
 
@@ -486,50 +544,93 @@ export default function GptImagePage() {
       if (jobError) throw jobError
 
       // Upload template if template mode is enabled
-      if (useTemplate && templateFile) {
+      let finalTemplateUrl = null
+      if (useTemplate) {
         setUploading(true)
-        console.log('📤 Uploading template file...')
         
-        const formData = new FormData()
-        formData.append('files', templateFile)
-
-        try {
-          const templateUpload = await fetch('/api/upload-images', {
-            method: 'POST',
-            body: formData,
-          })
-
-          if (!templateUpload.ok) {
-            throw new Error('ไม่สามารถอัพโหลด Template ได้')
-          }
-
-          const templateData = await templateUpload.json()
-          const templateUrl = templateData.images[0]?.url
+        // Check if template is from Google Drive (selected URL) or uploaded file
+        if (selectedTemplateUrl) {
+          // Template from Google Drive - convert to Cloudinary
+          console.log('📤 Converting Drive template to Cloudinary...')
           
-          if (!templateUrl) {
-            throw new Error('ไม่พบ URL ของ Template')
-          }
+          try {
+            const templateImg = templateImages.find(img => img.url === selectedTemplateUrl)
+            if (templateImg) {
+              const response = await fetch('/api/drive/download-and-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fileId: templateImg.id,
+                  fileName: templateImg.name,
+                }),
+              })
 
+              if (!response.ok) {
+                throw new Error('ไม่สามารถแปลง Template จาก Google Drive ได้')
+              }
+
+              const data = await response.json()
+              finalTemplateUrl = data.url
+              console.log('✅ Drive template converted:', finalTemplateUrl)
+            }
+          } catch (templateError) {
+            await supabase
+              .from('jobs')
+              .update({ 
+                status: 'failed',
+                error: templateError instanceof Error ? templateError.message : 'Template conversion failed'
+              })
+              .eq('id', job.id)
+            throw templateError
+          }
+        } else if (templateFile) {
+          // Template from file upload
+          console.log('📤 Uploading template file...')
+          
+          const formData = new FormData()
+          formData.append('files', templateFile)
+
+          try {
+            const templateUpload = await fetch('/api/upload-images', {
+              method: 'POST',
+              body: formData,
+            })
+
+            if (!templateUpload.ok) {
+              throw new Error('ไม่สามารถอัพโหลด Template ได้')
+            }
+
+            const templateData = await templateUpload.json()
+            finalTemplateUrl = templateData.images[0]?.url
+            
+            if (!finalTemplateUrl) {
+              throw new Error('ไม่พบ URL ของ Template')
+            }
+
+            console.log('✅ Template uploaded:', finalTemplateUrl)
+          } catch (templateError) {
+            await supabase
+              .from('jobs')
+              .update({ 
+                status: 'failed',
+                error: templateError instanceof Error ? templateError.message : 'Template upload failed'
+              })
+              .eq('id', job.id)
+            throw templateError
+          }
+        }
+
+        if (finalTemplateUrl) {
           // Update job with template URL
           await supabase
             .from('jobs')
-            .update({ template_url: templateUrl })
+            .update({ template_url: finalTemplateUrl })
             .eq('id', job.id)
 
-          jobData.template_url = templateUrl
-          setUploading(false)
-          console.log('✅ Template uploaded:', templateUrl)
-        } catch (templateError) {
-          // Mark job as failed if template upload fails
-          await supabase
-            .from('jobs')
-            .update({ 
-              status: 'failed',
-              error: templateError instanceof Error ? templateError.message : 'Template upload failed'
-            })
-            .eq('id', job.id)
-          throw templateError
+          jobData.template_url = finalTemplateUrl
         }
+        
+        setUploading(false)
       }
 
       // Call appropriate API based on mode
@@ -697,7 +798,7 @@ export default function GptImagePage() {
                     setUseTemplate(e.target.checked)
                     if (!e.target.checked) {
                       setTemplateFile(null)
-                      setTemplatePreview(null)
+                      setSelectedTemplateUrl('')
                     }
                   }}
                   className="w-5 h-5 text-orange-500 rounded focus:ring-2 focus:ring-orange-500"
@@ -708,105 +809,180 @@ export default function GptImagePage() {
             </div>
 
             {useTemplate && (
-              <>
-                <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <div className="ml-3">
-                     
-                    </div>
+              <div className="space-y-4">
+                <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
+                  <p className="text-sm text-blue-800">
+                    💡 เลือก Template จาก Google Drive หรืออัพโหลดจากเครื่อง
+                  </p>
+                </div>
+
+                {/* Folder Tree + Upload Section */}
+                <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg p-4 border-2 border-blue-200">
+                  <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                    <span>📁</span>
+                    <span>เลือกโฟลเดอร์ Template จาก Google Drive</span>
+                  </h4>
+                  
+                  {/* Search */}
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      placeholder="🔍 ค้นหาชื่อ template..."
+                      className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {/* Load Button */}
+                  {templateFolderId && (
+                    <button
+                      onClick={loadTemplateImages}
+                      disabled={loadingTemplates}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-3 flex items-center justify-center gap-2 text-sm"
+                    >
+                      <span>{loadingTemplates ? '⏳' : '📂'}</span>
+                      <span>{loadingTemplates ? 'กำลังโหลด...' : 'โหลด Template จากโฟลเดอร์'}</span>
+                    </button>
+                  )}
+
+                  {/* Folder Tree */}
+                  <div className="max-h-64 overflow-y-auto pr-2 mb-3">
+                    {driveFolders.map((drive) => (
+                      <div key={`template-${drive.driveId}`} className="mb-4">
+                        <h5 className="text-xs font-semibold text-blue-700 mb-2">
+                          🎨 {drive.driveName}
+                        </h5>
+                        <FolderTree
+                          folders={drive.folders}
+                          onSelectFolder={setTemplateFolderId}
+                          selectedFolderId={templateFolderId}
+                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                          driveId={drive.driveId}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Upload Button */}
+                  <div className="pt-3 border-t-2 border-blue-200">
+                    <input
+                      type="file"
+                      id="gpt-template-upload"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+
+                        setUploading(true)
+                        try {
+                          let fileToUpload = file
+                          if (file.size > 3 * 1024 * 1024) {
+                            console.log(`Compressing template: ${(file.size / (1024 * 1024)).toFixed(2)}MB`)
+                            fileToUpload = await imageCompression(file, {
+                              maxSizeMB: 3,
+                              maxWidthOrHeight: 2048,
+                              useWebWorker: true,
+                            })
+                            console.log(`✓ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
+                          }
+
+                          const formData = new FormData()
+                          formData.append('files', fileToUpload)
+
+                          const res = await fetch('/api/upload-images', {
+                            method: 'POST',
+                            body: formData,
+                          })
+
+                          if (res.ok) {
+                            const data = await res.json()
+                            const uploadedTemplate = data.images[0]
+                            setTemplateImages(prev => [uploadedTemplate, ...prev])
+                            setSelectedTemplateUrl(uploadedTemplate.url)
+                            setError('')
+                          } else {
+                            setError('ไม่สามารถอัพโหลด Template ได้')
+                          }
+                        } catch (err) {
+                          console.error('Template error:', err)
+                          setError('เกิดข้อผิดพลาดในการอัพโหลด Template')
+                        } finally {
+                          setUploading(false)
+                        }
+                        e.target.value = ''
+                      }}
+                      className="hidden"
+                      disabled={creating || uploading}
+                    />
+                    <label
+                      htmlFor="gpt-template-upload"
+                      className={`block w-full text-center px-3 py-2 rounded-lg font-semibold cursor-pointer transition-all text-sm ${
+                        uploading
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-orange-500 hover:bg-orange-600 text-white'
+                      }`}
+                    >
+                      {uploading ? '⏳ กำลังอัพโหลด...' : '📤 อัพโหลด Template จากเครื่อง'}
+                    </label>
                   </div>
                 </div>
 
-                {/* Template Upload */}
-                <div className="bg-white rounded-lg p-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3">📤 อัพโหลดเทมเพลต (ตัวอย่างที่ต้องการ)</h4>
-                  
-                  {!templateFile ? (
-                    <div>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0]
-                          if (!file) return
-
-                          try {
-                            // Client-side compression for large files
-                            let fileToUpload = file
-                            if (file.size > 3 * 1024 * 1024) {
-                              console.log(`Compressing template: ${(file.size / (1024 * 1024)).toFixed(2)}MB`)
-                              fileToUpload = await imageCompression(file, {
-                                maxSizeMB: 3,
-                                maxWidthOrHeight: 2048,
-                                useWebWorker: true,
-                              })
-                              console.log(`✓ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
-                            }
-
-                            setTemplateFile(fileToUpload)
-                            
-                            // Create preview
-                            const reader = new FileReader()
-                            reader.onloadend = () => {
-                              setTemplatePreview(reader.result as string)
-                            }
-                            reader.readAsDataURL(fileToUpload)
-                            setError('')
-                          } catch (err) {
-                            console.error('Template error:', err)
-                            setError('ไม่สามารถโหลดเทมเพลตได้')
-                          }
-                          e.target.value = ''
-                        }}
-                        className="w-full border-2 border-dashed border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                        disabled={creating || uploading}
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
-                        รองรับ: JPG, PNG, WebP (ขนาดไม่เกิน 10MB)
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="border-2 border-orange-300 rounded-lg p-4 bg-orange-50">
-                      <div className="flex items-center justify-between mb-2">
-                        <h5 className="text-sm font-semibold text-gray-700">✅ เทมเพลตที่เลือก:</h5>
-                        <button
-                          onClick={() => {
-                            setTemplateFile(null)
-                            setTemplatePreview(null)
-                          }}
-                          className="text-red-500 hover:text-red-700 font-semibold text-sm"
-                          disabled={creating}
+                {/* Template Images Grid */}
+                {templateImages.length > 0 && (
+                  <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-3">
+                      🎨 Template ที่มี ({templateImages.length} รูป)
+                    </h4>
+                    <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
+                      {displayedTemplateImages.map((img) => (
+                        <div
+                          key={img.id}
+                          onClick={() => setSelectedTemplateUrl(img.url)}
+                          className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
+                            selectedTemplateUrl === img.url
+                              ? 'ring-4 ring-blue-500 scale-95'
+                              : 'ring-2 ring-gray-200 hover:ring-blue-300'
+                          }`}
                         >
-                          🗑️ ลบ
-                        </button>
-                      </div>
-                      {templatePreview && (
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={templatePreview}
-                            alt="Template preview"
-                            className="w-24 h-24 object-cover rounded-lg border-2 border-orange-300"
+                          <Image
+                            src={img.thumbnailUrl}
+                            alt={img.name}
+                            fill
+                            sizes="(max-width: 768px) 50vw, 20vw"
+                            className="object-cover"
                           />
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{templateFile.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {(templateFile.size / (1024 * 1024)).toFixed(2)} MB
-                            </p>
-                            <p className="text-xs text-orange-600 mt-1">
-                              ระบบจะใช้เทมเพลตนี้ในการจัด layout
-                            </p>
-                          </div>
+                          {selectedTemplateUrl === img.url && (
+                            <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
+                              <span className="text-4xl">✓</span>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
-                  )}
-                </div>
-              </>
+                  </div>
+                )}
+
+                {/* Selected Template Info */}
+                {selectedTemplateUrl && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 text-sm text-green-700 bg-green-50 p-3 rounded-lg border border-green-200 font-medium">
+                      ✅ เลือก Template แล้ว
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedTemplateUrl('')
+                        setTemplateFile(null)
+                      }}
+                      className="px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
+                      title="ยกเลิก Template"
+                      disabled={creating}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
