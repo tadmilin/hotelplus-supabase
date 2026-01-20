@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Replicate from 'replicate'
+import { createClient } from '@/lib/supabase/server'
 
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN!,
@@ -51,6 +52,13 @@ export async function POST(req: NextRequest) {
         webhook_events_filter: ['completed'],
       })
 
+      // 🔥 Update replicate_id for webhook tracking (enables auto-upscale)
+      const supabase = await createClient()
+      await supabase
+        .from('jobs')
+        .update({ replicate_id: prediction.id })
+        .eq('id', jobId)
+
       return NextResponse.json({
         success: true,
         id: prediction.id,
@@ -74,6 +82,13 @@ export async function POST(req: NextRequest) {
       webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
       webhook_events_filter: ['completed'],
     })
+
+    // 🔥 Update replicate_id for webhook tracking (enables auto-upscale)
+    const supabase = await createClient()
+    await supabase
+      .from('jobs')
+      .update({ replicate_id: prediction.id })
+      .eq('id', jobId)
 
     return NextResponse.json({
       success: true,
