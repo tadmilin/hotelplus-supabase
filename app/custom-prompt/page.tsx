@@ -243,6 +243,7 @@ export default function CustomPromptPage() {
     return filtered
   }
 
+  // 💾 localStorage Cache Helpers (1 hour TTL)
   async function fetchDriveFolders() {
     setIsLoadingFolders(true)
     setLoadingTimer(0)
@@ -253,24 +254,54 @@ export default function CustomPromptPage() {
     }, 100)
     
     try {
-      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
-      
       // ⚠️ IMPORTANT: โหลด excluded folders ก่อนเสมอ
-      // เพื่อให้แน่ใจว่า excludedFolderIds มีข้อมูลล่าสุด
       await loadExcludedFolders()
+      
+      // 💾 เช็ค localStorage cache ก่อน
+      const cacheKey = 'drive_folders_cache'
+      const cached = localStorage.getItem(cacheKey)
+      
+      if (cached) {
+        try {
+          const { data, timestamp } = JSON.parse(cached)
+          const ageInMinutes = (Date.now() - timestamp) / (1000 * 60)
+          
+          // ถ้าไม่เกิน 60 นาที ใช้ cache
+          if (ageInMinutes < 60) {
+            console.log(`✅ Using cached folders (${ageInMinutes.toFixed(1)} นาทีที่แล้ว)`)
+            const filteredDrives = data.map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
+              ...drive,
+              folders: filterExcludedFolders(drive.folders)
+            }))
+            setDriveFolders(filteredDrives)
+            setStatus(`✅ โหลดจาก cache (${data.length} drives)`)
+            setTimeout(() => setStatus(''), 3000)
+            return
+          }
+        } catch {
+          console.log('Cache parse error, fetching fresh data')
+        }
+      }
+      
+      // ไม่มี cache หรือหมดอายุ → โหลดใหม่
+      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
       
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
+        
+        // 💾 บันทึก cache
+        localStorage.setItem(cacheKey, JSON.stringify({
+          data: data.drives || [],
+          timestamp: Date.now()
+        }))
+        
         // กรองโฟลเดอร์ที่ถูก exclude ออก
         const filteredDrives = (data.drives || []).map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
           ...drive,
           folders: filterExcludedFolders(drive.folders)
         }))
         setDriveFolders(filteredDrives)
-        
-        // ⚡ ข้าม count images - ให้แสดงเลขตอนโหลดจริง (เร็วขึ้นมาก)
-        // await countImagesInFolders(filteredDrives)
         
         setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
         setTimeout(() => setStatus(''), 3000)
@@ -730,6 +761,8 @@ export default function CustomPromptPage() {
               <div className="flex flex-col gap-1">
                 <button
                   onClick={async () => {
+                    // ลบ cache ก่อนโหลดใหม่
+                    localStorage.removeItem('drive_folders_cache')
                     await syncDrives()
                     await fetchDriveFolders()
                   }}
@@ -848,7 +881,7 @@ export default function CustomPromptPage() {
                   value={folderSearch}
                   onChange={(e) => setFolderSearch(e.target.value)}
                   placeholder="🔍 ค้นหาโฟลเดอร์... (พิมพ์ชื่อ)"
-                  className="w-full px-4 py-2 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none"
+                  className="w-full px-4 py-2 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none text-black"
                 />
                 {folderSearch && (
                   <p className="text-xs text-gray-500 mt-1">
@@ -1041,7 +1074,7 @@ export default function CustomPromptPage() {
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   rows={6}
                   placeholder="เช่น: ทำให้รูปสว่างขึ้น เพิ่มความคมชัด และปรับสีให้สดใส..."
-                  className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500 mt-2">
                   {customPrompt.length} ตัวอักษร
@@ -1109,7 +1142,7 @@ export default function CustomPromptPage() {
                           value={templateSearch}
                           onChange={(e) => setTemplateSearch(e.target.value)}
                           placeholder="🔍 ค้นหาโฟลเดอร์ template... (พิมพ์ชื่อ)"
-                          className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                          className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 text-black"
                         />
                         {templateSearch && (
                           <p className="text-xs text-gray-500 mt-1">

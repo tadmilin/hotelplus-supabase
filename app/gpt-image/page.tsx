@@ -38,9 +38,11 @@ export default function GptImagePage() {
   const [driveFolders, setDriveFolders] = useState<Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>>([])
   const [selectedFolderId, setSelectedFolderId] = useState('')
   const [driveImages, setDriveImages] = useState<DriveImage[]>([])
+  const [displayedImages, setDisplayedImages] = useState<DriveImage[]>([]) // 🚀 Lazy loading
   const [selectedDriveImages, setSelectedDriveImages] = useState<DriveImage[]>([])
   const [imageCounts, setImageCounts] = useState<Record<string, number>>({})
   const [loadingImages, setLoadingImages] = useState(false)
+  const [status, setStatus] = useState('')
   const [loadingTimer, setLoadingTimer] = useState(0)
   const [isLoadingFolders, setIsLoadingFolders] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -212,6 +214,12 @@ export default function GptImagePage() {
       if (res.ok) {
         const data = await res.json()
         setTemplateImages(data.images || [])
+        
+        // ⚡ อัพเดทจำนวนรูปในโฟลเดอร์นี้
+        setImageCounts(prev => ({
+          ...prev,
+          [templateFolderId]: data.images.length
+        }))
       } else {
         alert('ไม่สามารถโหลด Template ได้')
       }
@@ -280,17 +288,18 @@ export default function GptImagePage() {
     setIsLoadingFolders(true)
     setLoadingTimer(0)
     
+    // Start timer
     const timerInterval = setInterval(() => {
       setLoadingTimer(prev => prev + 0.1)
     }, 100)
     
     try {
+      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
+      
       // ⚠️ IMPORTANT: โหลด excluded folders ก่อนเสมอ
       // เพื่อให้แน่ใจว่า excludedFolderIds มีข้อมูลล่าสุด
       await loadExcludedFolders()
       
-      // ✅ ดึงจาก database (user_drive_access) - เร็ว!
-      // ไม่ sync จาก Google API อัตโนมัติอีกต่อไป
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
@@ -300,45 +309,21 @@ export default function GptImagePage() {
           folders: filterExcludedFolders(drive.folders)
         }))
         setDriveFolders(filteredDrives)
-        await countImagesInFolders(filteredDrives)
+        
+        // ⚡ ข้าม count images - ให้แสดงเลขตอนโหลดจริง (เร็วขึ้นมาก)
+        // await countImagesInFolders(filteredDrives)
+        
+        setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
+        setTimeout(() => setStatus(''), 3000)
+      } else {
+        setStatus('❌ โหลดล้มเหลว')
       }
     } catch (error) {
       console.error('Error fetching Drive folders:', error)
+      setStatus('❌ เกิดข้อผิดพลาด')
     } finally {
       clearInterval(timerInterval)
       setIsLoadingFolders(false)
-    }
-  }
-
-  async function countImagesInFolders(drives: Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>) {
-    const folderIds: string[] = []
-    
-    function collectFolderIds(folders: TreeFolder[]) {
-      for (const folder of folders) {
-        folderIds.push(folder.id)
-        if (folder.children && folder.children.length > 0) {
-          collectFolderIds(folder.children)
-        }
-      }
-    }
-    
-    drives.forEach(drive => collectFolderIds(drive.folders))
-    
-    if (folderIds.length === 0) return
-    
-    try {
-      const res = await fetch('/api/drive/count-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderIds }),
-      })
-      
-      if (res.ok) {
-        const data = await res.json()
-        setImageCounts(data.counts || {})
-      }
-    } catch (error) {
-      console.error('Error counting images:', error)
     }
   }
 
@@ -349,6 +334,7 @@ export default function GptImagePage() {
     }
 
     setLoadingImages(true)
+    setStatus('🔄 กำลังโหลดรูปจาก Google Drive...')
 
     try {
       const res = await fetch('/api/drive/list-folder', {
@@ -360,12 +346,24 @@ export default function GptImagePage() {
       if (res.ok) {
         const data = await res.json()
         setDriveImages(data.images || [])
+        setDisplayedImages((data.images || []).slice(0, 100)) // 🚀 โชว์ 100 รูปก่อน
+        
+        // ⚡ อัพเดทจำนวนรูปในโฟลเดอร์นี้
+        setImageCounts(prev => ({
+          ...prev,
+          [selectedFolderId]: data.images.length
+        }))
+        
+        setStatus(`✅ โหลด ${data.images.length} รูป${data.cached ? ' (จาก cache)' : ''}`)
+        setTimeout(() => setStatus(''), 3000)
       } else {
         alert('Failed to load images')
+        setStatus('')
       }
     } catch (error) {
       console.error('Error fetching images:', error)
       alert('Error loading images')
+      setStatus('')
     } finally {
       setLoadingImages(false)
     }
@@ -762,6 +760,12 @@ export default function GptImagePage() {
 
         {/* Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8 space-y-6">
+          {status && (
+            <div className="bg-blue-50 border-2 border-blue-200 text-blue-700 px-4 py-3 rounded-lg text-center font-semibold">
+              {status}
+            </div>
+          )}
+          
           {error && (
             <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg">
               ⚠️ {error}
@@ -778,7 +782,7 @@ export default function GptImagePage() {
               onChange={(e) => setPrompt(e.target.value)}
               rows={6}
               placeholder='เช่น: A photorealistic scene of a modern hotel lobby with natural lighting, "Welcome to Paradise" text on the wall, 4K quality...'
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
               disabled={creating}
             />
             <p className="text-xs text-gray-500 mt-2">
@@ -830,7 +834,7 @@ export default function GptImagePage() {
                       value={templateSearch}
                       onChange={(e) => setTemplateSearch(e.target.value)}
                       placeholder="🔍 ค้นหาชื่อ template..."
-                      className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                      className="w-full border-2 border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 text-black"
                     />
                   </div>
 
@@ -1047,35 +1051,50 @@ export default function GptImagePage() {
                   <h4 className="text-sm font-semibold text-gray-700 mb-3">
                     รูปในโฟลเดอร์ ({driveImages.length} รูป)
                   </h4>
-                  {driveImages.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-2">
-                      {driveImages.map((img) => {
-                        const isSelected = selectedDriveImages.some(selected => selected.id === img.id)
-                        return (
-                          <div
-                            key={img.id}
-                            onClick={() => toggleDriveImage(img)}
-                            className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
-                              isSelected
-                                ? 'ring-4 ring-green-500 scale-95'
-                                : 'ring-2 ring-gray-200 hover:ring-gray-400'
-                            }`}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={img.thumbnailUrl}
-                              alt={img.name}
-                              className="w-full h-full object-cover"
-                            />
-                            {isSelected && (
-                              <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
-                                <span className="text-2xl">✓</span>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                  {displayedImages.length > 0 ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        {displayedImages.map((img) => {
+                          const isSelected = selectedDriveImages.some(selected => selected.id === img.id)
+                          return (
+                            <div
+                              key={img.id}
+                              onClick={() => toggleDriveImage(img)}
+                              className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'ring-4 ring-green-500 scale-95'
+                                  : 'ring-2 ring-gray-200 hover:ring-gray-400'
+                              }`}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={img.thumbnailUrl}
+                                alt={img.name}
+                                className="w-full h-full object-cover"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
+                                  <span className="text-2xl">✓</span>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                      
+                      {/* Load More Button */}
+                      {displayedImages.length < driveImages.length && (
+                        <button
+                          onClick={() => setDisplayedImages(prev => [
+                            ...prev,
+                            ...driveImages.slice(prev.length, prev.length + 100)
+                          ])}
+                          className="mt-4 w-full px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-lg font-semibold transition-all"
+                        >
+                          📥 โหลดเพิ่ม ({driveImages.length - displayedImages.length} รูปเหลือ)
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <p className="text-gray-400 text-center py-8">
                       เลือกโฟลเดอร์แล้วกดโหลด
@@ -1125,7 +1144,7 @@ export default function GptImagePage() {
               accept="image/*"
               multiple
               onChange={handleImageSelect}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={creating}
             />
             <p className="text-xs text-gray-500 mt-2">
@@ -1164,7 +1183,7 @@ export default function GptImagePage() {
             <select
               value={aspectRatio}
               onChange={(e) => setAspectRatio(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={creating}
             >
               <option value="1:1">1:1 (Square - จัตุรัส)</option>
@@ -1184,7 +1203,7 @@ export default function GptImagePage() {
               max="10"
               value={numImages}
               onChange={(e) => setNumImages(Math.min(10, Math.max(1, parseInt(e.target.value) || 1)))}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={creating}
             />
           </div>
@@ -1197,7 +1216,7 @@ export default function GptImagePage() {
             <select
               value={quality}
               onChange={(e) => setQuality(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={creating}
             >
               <option value="auto">Auto (แนะนำ - ปรับอัตโนมัติ)</option>
@@ -1218,7 +1237,7 @@ export default function GptImagePage() {
             <select
               value={outputFormat}
               onChange={(e) => setOutputFormat(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               disabled={creating}
             >
               <option value="webp">WebP (แนะนำ - ไฟล์เล็ก คุณภาพดี)</option>
