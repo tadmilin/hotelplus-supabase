@@ -330,7 +330,8 @@ export async function POST(req: NextRequest) {
               prompt: templatePrompt,
               aspect_ratio: 'match_input_image',
               output_format: 'png',
-              resolution: '1K',
+              resolution: '1K', // ใช้ 1K เพราะจะมี auto-upscale x2 ต่อ (1K → 2K ปลอดภัย)
+              safety_filter_level: 'block_only_high', // เปิด permissive mode
             }
 
             try {
