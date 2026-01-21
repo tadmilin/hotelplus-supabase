@@ -323,24 +323,54 @@ export default function GptImagePage() {
     }, 100)
     
     try {
-      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
-      
       // ⚠️ IMPORTANT: โหลด excluded folders ก่อนเสมอ
-      // เพื่อให้แน่ใจว่า excludedFolderIds มีข้อมูลล่าสุด
       await loadExcludedFolders()
+      
+      // 💾 เช็ค localStorage cache ก่อน
+      const cacheKey = 'drive_folders_cache'
+      const cached = localStorage.getItem(cacheKey)
+      
+      if (cached) {
+        try {
+          const { data, timestamp } = JSON.parse(cached)
+          const ageInMinutes = (Date.now() - timestamp) / (1000 * 60)
+          
+          // ถ้าไม่เกิน 60 นาที ใช้ cache
+          if (ageInMinutes < 60) {
+            console.log(`✅ Using cached folders (${ageInMinutes.toFixed(1)} นาทีที่แล้ว)`)
+            const filteredDrives = data.map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
+              ...drive,
+              folders: filterExcludedFolders(drive.folders)
+            }))
+            setDriveFolders(filteredDrives)
+            setStatus(`✅ โหลดจาก cache (${data.length} drives)`)
+            setTimeout(() => setStatus(''), 3000)
+            return
+          }
+        } catch {
+          console.log('Cache parse error, fetching fresh data')
+        }
+      }
+      
+      // ไม่มี cache หรือหมดอายุ → โหลดใหม่
+      setStatus('🔄 กำลังโหลดโฟลเดอร์จาก Google Drive...')
       
       const res = await fetch('/api/drive/list-folders')
       if (res.ok) {
         const data = await res.json()
+        
+        // 💾 บันทึก cache
+        localStorage.setItem(cacheKey, JSON.stringify({
+          data: data.drives || [],
+          timestamp: Date.now()
+        }))
+        
         // กรองโฟลเดอร์ที่ถูก exclude ออก
         const filteredDrives = (data.drives || []).map((drive: { driveId: string; driveName: string; folders: TreeFolder[] }) => ({
           ...drive,
           folders: filterExcludedFolders(drive.folders)
         }))
         setDriveFolders(filteredDrives)
-        
-        // ⚡ ข้าม count images - ให้แสดงเลขตอนโหลดจริง (เร็วขึ้นมาก)
-        // await countImagesInFolders(filteredDrives)
         
         setStatus(`✅ โหลด ${data.drives?.length || 0} drives สำเร็จ ใช้เวลา ${loadingTimer.toFixed(1)} วินาที`)
         setTimeout(() => setStatus(''), 3000)
