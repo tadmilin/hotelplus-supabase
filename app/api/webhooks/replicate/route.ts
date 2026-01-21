@@ -266,24 +266,44 @@ export async function POST(req: NextRequest) {
             }
           }
           
-          // เพิ่มผลลัพธ์นี้เข้า completedPredictions
-          const completed = metadata.completedPredictions || []
-          completed.push({ id: webhook.id, urls: permanentUrls })
+          // ใช้ atomic update เพื่อป้องกัน race condition
+          // เพิ่ม prediction นี้เข้า completedPredictions โดยใช้ SQL append
+          const newCompleted = { id: webhook.id, urls: permanentUrls }
+          
+          // อ่าน job อีกครั้งเพื่อให้ได้ค่าล่าสุด (ป้องกัน race condition)
+          const { data: freshJob } = await supabaseAdmin
+            .from('jobs')
+            .select('metadata')
+            .eq('id', job.id)
+            .single()
+          
+          const freshMetadata = freshJob?.metadata as typeof metadata
+          const existingCompleted = freshMetadata?.completedPredictions || []
+          
+          // เช็คว่า prediction นี้ถูกเพิ่มไปแล้วหรือยัง (ป้องกัน duplicate)
+          const alreadyExists = existingCompleted.some((c: { id: string }) => c.id === webhook.id)
+          if (alreadyExists) {
+            console.log('⚠️ Prediction already processed, skipping:', webhook.id)
+            return NextResponse.json({ received: true, skipped: true })
+          }
+          
+          // เพิ่มผลลัพธ์ใหม่
+          const updatedCompleted = [...existingCompleted, newCompleted]
           
           await supabaseAdmin
             .from('jobs')
             .update({
-              metadata: { ...metadata, completedPredictions: completed },
+              metadata: { ...freshMetadata, completedPredictions: updatedCompleted },
               updated_at: new Date().toISOString(),
             })
             .eq('id', job.id)
           
           // เช็คว่าครบทุก predictions แล้วหรือยัง
-          if (completed.length === metadata.totalPredictions) {
+          if (updatedCompleted.length === metadata.totalPredictions) {
             console.log('✅ All GPT Image predictions completed - Starting Step 2')
             
             // รวบรวม URLs ทั้งหมด
-            const allGptUrls = completed.flatMap(c => c.urls)
+            const allGptUrls = updatedCompleted.flatMap((c: { urls: string[] }) => c.urls)
             
             // Update job with GPT results
             await supabaseAdmin
@@ -323,12 +343,12 @@ export async function POST(req: NextRequest) {
                 webhook_events_filter: ['completed'],
               })
 
-              // Update with Nano prediction ID and step 2
+              // Update with Nano prediction ID and step 2 (ใช้ freshMetadata แทน metadata เดิม)
               await supabaseAdmin
                 .from('jobs')
                 .update({
                   replicate_id: nanoPrediction.id,
-                  metadata: { ...metadata, step: 2, nanoStartedAt: new Date().toISOString() }
+                  metadata: { ...freshMetadata, step: 2, completedPredictions: updatedCompleted, nanoStartedAt: new Date().toISOString() }
                 })
                 .eq('id', job.id)
 
@@ -347,7 +367,7 @@ export async function POST(req: NextRequest) {
                 .eq('id', job.id)
             }
           } else {
-            console.log(`⏳ Waiting for more predictions: ${completed.length}/${metadata.totalPredictions}`)
+            console.log(`⏳ Waiting for more predictions: ${updatedCompleted.length}/${metadata.totalPredictions}`)
           }
           
           return NextResponse.json({ success: true })
