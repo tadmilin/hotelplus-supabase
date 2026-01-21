@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getDriveClient } from '@/lib/google-drive'
 import { uploadBase64ToCloudinary } from '@/lib/cloudinary'
 import sharp from 'sharp'
+import { GaxiosResponse } from 'gaxios'
 
 export async function POST(req: NextRequest) {
   let attempt = 0
@@ -29,17 +30,15 @@ export async function POST(req: NextRequest) {
 
       // Download with aggressive timeout and retry
       console.log(`⬇️ Downloading: ${fileId}`)
-      let response
+      let response: GaxiosResponse<ArrayBuffer>
       try {
         response = await drive.files.get(
           { fileId, alt: 'media' },
           { 
-            responseType: 'arraybuffer', 
+            responseType: 'arraybuffer' as 'json', 
             timeout: 90000, // 90 seconds
-            maxContentLength: 50 * 1024 * 1024, // 50MB max
-            maxBodyLength: 50 * 1024 * 1024
           }
-        )
+        ) as GaxiosResponse<ArrayBuffer>
       } catch (downloadError) {
         console.error(`❌ Download failed (attempt ${attempt}):`, downloadError)
         if (attempt < maxAttempts) {
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
         throw downloadError
       }
 
-      let buffer = Buffer.from(response.data as ArrayBuffer)
+      let buffer: Buffer = Buffer.from(response.data as ArrayBuffer)
       const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
       console.log(`📥 Downloaded: ${originalSizeMB}MB`)
       
