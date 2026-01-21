@@ -28,38 +28,45 @@ export async function POST(request: NextRequest) {
     try {
 
         console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages, inputImageCount: inputImages?.length || 0, templateUrl })
+        
+        const supabase = await createClient()
 
-        // ======= STEP 1: GPT Image 1.5 (สร้างรูปทีละรูป) =======
-        console.log('📸 Step 1: Running GPT Image 1.5...')
-        const gptOutput: string[] = []
+        // ======= STEP 1: GPT Image 1.5 (แยกรูปทีละรูปแต่ไม่ wait) =======
+        console.log('📸 Step 1: Creating GPT Image 1.5 predictions...')
+        
+        const gptPredictionIds: string[] = []
 
-        // ถ้ามี input images หลายรูป -> สร้างแยกรูปทีละรูป เพื่อไม่ให้เป็น collage
         if (inputImages && inputImages.length > 0) {
-            console.log(`🔄 Processing ${inputImages.length} input images separately...`)
-
+            // ส่งทีละรูป แต่ไม่ wait (สร้าง predictions พร้อมกัน)
+            console.log(`🔄 Creating ${inputImages.length} separate predictions...`)
+            
             for (let i = 0; i < inputImages.length; i++) {
-                console.log(`  📷 Image ${i + 1}/${inputImages.length}...`)
+                try {
+                    const singleInput: Record<string, unknown> = {
+                        prompt: prompt,
+                        aspect_ratio: aspectRatio || '1:1',
+                        number_of_images: 1,
+                        quality: quality || 'auto',
+                        output_format: outputFormat || 'webp',
+                        background: background || 'auto',
+                        moderation: moderation || 'auto',
+                        input_fidelity: inputFidelity || 'low',
+                        output_compression: outputCompression || 90,
+                        input_images: [inputImages[i]], // ส่งทีละรูป
+                    }
 
-                const singleInput: Record<string, unknown> = {
-                    prompt: prompt,
-                    aspect_ratio: aspectRatio || '1:1',
-                    number_of_images: 1, // สร้างรูปเดียวต่อ input
-                    quality: quality || 'auto',
-                    output_format: outputFormat || 'webp',
-                    input_images: [inputImages[i]], // ส่งทีละรูป
-                }
+                    const gptPrediction = await replicate.predictions.create({
+                        model: 'openai/gpt-image-1.5',
+                        input: singleInput,
+                        webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                        webhook_events_filter: ['completed'],
+                    })
 
-                const gptPrediction = await replicate.predictions.create({
-                    model: 'openai/gpt-image-1.5',
-                    input: singleInput,
-                })
-
-                const gptResult = await replicate.wait(gptPrediction)
-                const output = gptResult.output as string[]
-
-                if (output && output.length > 0) {
-                    gptOutput.push(...output)
-                    console.log(`  ✅ Image ${i + 1} completed`)
+                    gptPredictionIds.push(gptPrediction.id)
+                    console.log(`  ✅ Prediction ${i + 1}/${inputImages.length} created:`, gptPrediction.id)
+                } catch (predError) {
+                    console.error(`  ❌ Failed to create prediction ${i + 1}:`, predError)
+                    throw new Error(`Failed to create prediction for image ${i + 1}`)
                 }
             }
         } else {
@@ -70,111 +77,54 @@ export async function POST(request: NextRequest) {
                 number_of_images: numberOfImages || 1,
                 quality: quality || 'auto',
                 output_format: outputFormat || 'webp',
+                background: background || 'auto',
+                moderation: moderation || 'auto',
+                input_fidelity: inputFidelity || 'low',
+                output_compression: outputCompression || 90,
             }
 
             const gptPrediction = await replicate.predictions.create({
                 model: 'openai/gpt-image-1.5',
                 input: gptInput,
-            })
-
-            const gptResult = await replicate.wait(gptPrediction)
-            const output = gptResult.output as string[]
-            gptOutput.push(...output)
-        }
-
-        console.log('✅ GPT Image completed:', gptOutput.length, 'images')
-
-        // Update job with GPT results
-        const supabase = await createClient()
-        await supabase
-            .from('jobs')
-            .update({
-                output_urls: gptOutput,
-                status: 'processing_template'
-            })
-            .eq('id', jobId)
-
-        // ======= STEP 2: Nano Banana Pro (Apply Template - ยิงครั้งเดียว) =======
-        console.log('🎨 Step 2: Applying template with Nano Banana Pro...')
-        console.log(`📋 Template: ${templateUrl}`)
-        console.log(`📸 Input images: ${gptOutput.length} images`)
-
-        // Template prompt (hardcoded) - ไม่ต้องใส่ user prompt เพราะ GPT Image ทำไปแล้วใน Step 1
-        const templatePrompt = `[TEMPLATE MODE]
-ใช้ภาพแรกเป็น template รักษา Layout และกรอบดีไซน์ไว้ให้เหมือน 100%
-
-ขั้นตอน:
-1. ใช้รูปแรกหลัง Template เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
-2. รูปลำดับถัดมา ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
-3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับกรอบ)
-4. ลบข้อความตัวอักษร ตัวเลข และโลโก้ออก
-5. รักษาดีไซน์ โทนสี และองค์ประกอบศิลป์จาก template`
-
-        // ✅ ใช้ parameter ตาม Nano Banana Pro API (เหมือน custom-prompt)
-        const nanoInput = {
-            image_input: [templateUrl, ...gptOutput], // รูปแรก = template, รูปถัดไป = content
-            prompt: templatePrompt,
-            aspect_ratio: 'match_input_image',
-            output_format: 'png',
-            resolution: '1K', // ใช้ 1K เพื่อให้ upscale ได้ (2K ทำให้ Real-ESRGAN fail)
-        }
-
-        // ======= Update job with GPT results first =======
-        await supabase
-            .from('jobs')
-            .update({
-                output_urls: gptOutput,
-                status: 'processing'
-            })
-            .eq('id', jobId)
-
-        try {
-            console.log('🚀 Calling Nano Banana Pro with webhook...')
-            console.log('📋 Nano Input:', {
-                imageCount: [templateUrl, ...gptOutput].length,
-                hasPrompt: !!templatePrompt
-            })
-
-            const nanoPrediction = await replicate.predictions.create({
-                model: 'google/nano-banana-pro',
-                input: nanoInput,
                 webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
                 webhook_events_filter: ['completed'],
             })
 
-            // Update job with replicate_id for webhook tracking
-            await supabase
-                .from('jobs')
-                .update({
-                    replicate_id: nanoPrediction.id,
-                })
-                .eq('id', jobId)
-
-            console.log(`✅ Nano Banana Pro started: ${nanoPrediction.id}`)
-            console.log('⏳ Webhook will handle the final output')
-
-        } catch (err) {
-            console.error('❌ Nano Banana Pro failed:', err)
-            console.log('⚠️ Fallback: Using GPT Image results')
-            
-            // Fallback: keep GPT results as final output
-            await supabase
-                .from('jobs')
-                .update({
-                    status: 'completed',
-                    completed_at: new Date().toISOString()
-                })
-                .eq('id', jobId)
+            gptPredictionIds.push(gptPrediction.id)
+            console.log('✅ Single prediction created:', gptPrediction.id)
         }
 
-        // ======= STEP 3: Auto Upscale (Optional - Future) =======
-        // TODO: Add auto upscale if enabled
+        console.log('✅ All GPT Image predictions created:', gptPredictionIds.length)
 
+        // Validate predictions were created
+        if (gptPredictionIds.length === 0) {
+            throw new Error('No predictions were created')
+        }
+
+        // บันทึก job metadata สำหรับ webhook
+        await supabase
+            .from('jobs')
+            .update({
+                status: 'processing',
+                // เก็บ metadata สำหรับ webhook รวบรวมผล
+                metadata: {
+                    pipeline: 'gpt-with-template',
+                    templateUrl: templateUrl,
+                    step: 1,
+                    prompt: prompt,
+                    gptPredictions: gptPredictionIds,
+                    totalPredictions: gptPredictionIds.length,
+                    completedPredictions: [], // webhook จะเพิ่มเมื่อเสร็จ
+                }
+            })
+            .eq('id', jobId)
+
+        // Return ทันที (webhook จะจัดการต่อ)
         return NextResponse.json({
             success: true,
-            id: jobId,
-            gptResults: gptOutput.length,
-            message: 'Pipeline started, webhook will complete'
+            message: `Pipeline started - ${gptPredictionIds.length} GPT Image predictions processing...`,
+            gptPredictionIds: gptPredictionIds,
+            jobId: jobId,
         })
 
     } catch (error: unknown) {

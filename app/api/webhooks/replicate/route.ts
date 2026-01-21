@@ -175,12 +175,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
 
-    if (!jobs || jobs.length === 0) {
+    // ถ้าไม่เจอ job จาก replicate_id ให้ลองหาจาก metadata.gptPredictions
+    let job = jobs && jobs.length > 0 ? jobs[0] : null
+    
+    if (!job) {
+      console.log('🔍 No job found by replicate_id, searching in metadata...')
+      const { data: metadataJobs } = await supabaseAdmin
+        .from('jobs')
+        .select('*')
+        .not('metadata', 'is', null)
+        .limit(100)
+      
+      if (metadataJobs) {
+        job = metadataJobs.find(j => {
+          const meta = j.metadata as { gptPredictions?: string[] } | null
+          return meta?.gptPredictions?.includes(replicateId)
+        }) || null
+      }
+    }
+
+    if (!job) {
       console.error('❌ No job found with replicate_id:', replicateId)
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
 
-    const job = jobs[0]
+    console.log('✅ Job found:', job.id)
 
     // Process webhook based on status
     if (status === 'succeeded' || status === 'completed') {
@@ -207,6 +226,123 @@ export async function POST(req: NextRequest) {
         jobId: job.id,
         outputCount: outputUrls.length,
       })
+
+      // 🔍 Check if this is part of gpt-with-template pipeline (multiple predictions)
+      const metadata = job.metadata as { 
+        pipeline?: string; 
+        templateUrl?: string; 
+        step?: number; 
+        prompt?: string;
+        gptPredictions?: string[];
+        totalPredictions?: number;
+        completedPredictions?: Array<{ id: string; urls: string[] }>;
+      } | null
+      
+      if (metadata?.pipeline === 'gpt-with-template' && metadata?.step === 1 && webhook) {
+        // ตรวจสอบว่า prediction นี้อยู่ใน list หรือไม่
+        const isPartOfBatch = metadata.gptPredictions?.includes(webhook.id)
+        
+        if (isPartOfBatch) {
+          console.log('🔄 GPT Image batch: prediction completed', webhook.id)
+          
+          // อัพโหลดรูปไป Cloudinary
+          const permanentUrls: string[] = []
+          for (const tempUrl of outputUrls) {
+            try {
+              const url = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+              permanentUrls.push(url)
+            } catch {
+              permanentUrls.push(tempUrl)
+            }
+          }
+          
+          // เพิ่มผลลัพธ์นี้เข้า completedPredictions
+          const completed = metadata.completedPredictions || []
+          completed.push({ id: webhook.id, urls: permanentUrls })
+          
+          await supabaseAdmin
+            .from('jobs')
+            .update({
+              metadata: { ...metadata, completedPredictions: completed },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', job.id)
+          
+          // เช็คว่าครบทุก predictions แล้วหรือยัง
+          if (completed.length === metadata.totalPredictions) {
+            console.log('✅ All GPT Image predictions completed - Starting Step 2')
+            
+            // รวบรวม URLs ทั้งหมด
+            const allGptUrls = completed.flatMap(c => c.urls)
+            
+            // Update job with GPT results
+            await supabaseAdmin
+              .from('jobs')
+              .update({
+                output_urls: allGptUrls,
+                status: 'processing_template',
+              })
+              .eq('id', job.id)
+            
+            // สร้าง Step 2: Nano Banana Pro
+            const templatePrompt = `${metadata.prompt || ''}
+
+[TEMPLATE MODE]
+ใช้ภาพแรกเป็น template รักษา Layout และกรอบดีไซน์ไว้ให้เหมือน 100%
+
+ขั้นตอน:
+1. ใช้รูปแรกหลัง Template เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
+2. รูปลำดับถัดมา ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
+3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับกรอบ)
+4. ลบข้อความตัวอักษร ตัวเลข และโลโก้ออก
+5. รักษาดีไซน์ โทนสี และองค์ประกอบศิลป์จาก template`
+
+            const nanoInput = {
+              image_input: [metadata.templateUrl, ...allGptUrls],
+              prompt: templatePrompt,
+              aspect_ratio: 'match_input_image',
+              output_format: 'png',
+              resolution: '1K',
+            }
+
+            try {
+              const nanoPrediction = await replicate.predictions.create({
+                model: 'google/nano-banana-pro',
+                input: nanoInput,
+                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                webhook_events_filter: ['completed'],
+              })
+
+              // Update with Nano prediction ID and step 2
+              await supabaseAdmin
+                .from('jobs')
+                .update({
+                  replicate_id: nanoPrediction.id,
+                  metadata: { ...metadata, step: 2, nanoStartedAt: new Date().toISOString() }
+                })
+                .eq('id', job.id)
+
+              console.log('✅ Step 2 started:', nanoPrediction.id)
+            } catch (error) {
+              console.error('❌ Step 2 failed:', error)
+              const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+              // Fallback: Mark as completed with GPT results only
+              await supabaseAdmin
+                .from('jobs')
+                .update({
+                  status: 'completed',
+                  completed_at: new Date().toISOString(),
+                  error: `Template step failed: ${errorMsg}. GPT results saved.`,
+                })
+                .eq('id', job.id)
+            }
+          } else {
+            console.log(`⏳ Waiting for more predictions: ${completed.length}/${metadata.totalPredictions}`)
+          }
+          
+          return NextResponse.json({ success: true })
+        }
+      }
 
       // อัพโหลดรูปไป Cloudinary เพื่อเก็บถาวร (Replicate URLs หมดอายุ!)
       const permanentUrls: string[] = []

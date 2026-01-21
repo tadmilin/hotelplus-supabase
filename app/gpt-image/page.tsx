@@ -25,6 +25,10 @@ export default function GptImagePage() {
   const [numImages, setNumImages] = useState(1)
   const [quality, setQuality] = useState('auto')
   const [outputFormat, setOutputFormat] = useState('webp')
+  const [background, setBackground] = useState('auto')
+  const [moderation, setModeration] = useState('auto')
+  const [inputFidelity, setInputFidelity] = useState('low')
+  const [outputCompression, setOutputCompression] = useState(90)
   const [inputImages, setInputImages] = useState<File[]>([])
   const [creating, setCreating] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -47,6 +51,9 @@ export default function GptImagePage() {
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
   const [excludedFolderIds, setExcludedFolderIds] = useState<Set<string>>(new Set())
+  
+  // 🔍 Search state
+  const [folderSearch, setFolderSearch] = useState('')
 
   // Template Mode (GPT → Nano Banana Pro Pipeline)
   const [useTemplate, setUseTemplate] = useState(false)
@@ -278,6 +285,32 @@ export default function GptImagePage() {
         ...folder,
         children: folder.children ? filterExcludedFolders(folder.children) : []
       }))
+  }
+
+  // 🔍 ฟังก์ชันกรองโฟลเดอร์ตามคำค้นหา (exact substring match)
+  function filterFoldersBySearch(folders: TreeFolder[], searchTerm: string): TreeFolder[] {
+    if (!searchTerm) return folders
+    
+    const searchLower = searchTerm.toLowerCase()
+    const filtered: TreeFolder[] = []
+    
+    for (const folder of folders) {
+      // ✅ ตรวจสอบว่าชื่อโฟลเดอร์มีคำค้นหาหรือไม่ (exact substring)
+      const nameMatch = folder.name.toLowerCase().includes(searchLower)
+      
+      // ตรวจสอบ children ด้วย
+      const filteredChildren = folder.children ? filterFoldersBySearch(folder.children, searchTerm) : []
+      
+      // ถ้าชื่อตรง หรือมี children ที่ตรง → เอาไว้
+      if (nameMatch || filteredChildren.length > 0) {
+        filtered.push({
+          ...folder,
+          children: filteredChildren
+        })
+      }
+    }
+    
+    return filtered
   }
 
   async function fetchDriveFolders() {
@@ -555,6 +588,10 @@ export default function GptImagePage() {
         aspect_ratio: aspectRatio,
         quality: quality,
         output_format: outputFormat,
+        background: background,
+        moderation: moderation,
+        input_fidelity: inputFidelity,
+        output_compression: outputCompression,
         number_of_images: numImages,
         image_urls: imageUrls,
         output_urls: [],
@@ -691,6 +728,10 @@ export default function GptImagePage() {
       const apiBody: Record<string, unknown> = {
         jobId: job.id,
         prompt: prompt,
+        background: background,
+        moderation: moderation,
+        inputFidelity: inputFidelity,
+        outputCompression: outputCompression,
         aspectRatio: aspectRatio,
         numberOfImages: numImages,
         quality: quality,
@@ -1087,36 +1128,60 @@ export default function GptImagePage() {
                 </button>
               </div>
               
+              {/* 🔍 Search Box */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  value={folderSearch}
+                  onChange={(e) => setFolderSearch(e.target.value)}
+                  placeholder="🔍 ค้นหาโฟลเดอร์... (พิมพ์ชื่อ)"
+                  className="w-full px-4 py-2 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none text-black"
+                />
+                {folderSearch && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    กรองโฟลเดอร์ที่มี &ldquo;{folderSearch}&rdquo;
+                  </p>
+                )}
+              </div>
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Folder Tree */}
                 <div>
                   <div className="bg-white rounded-lg p-4 max-h-96 overflow-y-auto">
                     <h4 className="text-sm font-semibold text-gray-700 mb-3">โฟลเดอร์:</h4>
-                    {driveFolders.map((drive) => (
-                      <div key={drive.driveId} className="mb-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <h5 className="text-xs font-semibold text-gray-600 flex items-center gap-2">
-                            <span>📱</span>
-                            <span>{drive.driveName}</span>
-                          </h5>
-                          <button
-                            onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
-                            title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
-                          >
-                            🗑️
-                          </button>
+                    {driveFolders.map((drive) => {
+                      // 🔍 กรองโฟลเดอร์ตามคำค้นหา
+                      const filteredFolders = filterFoldersBySearch(drive.folders, folderSearch)
+                      
+                      // ถ้าไม่มีโฟลเดอร์ที่ตรงเงื่อนไข ไม่แสดง drive นี้
+                      if (folderSearch && filteredFolders.length === 0) return null
+                      
+                      return (
+                        <div key={drive.driveId} className="mb-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h5 className="text-xs font-semibold text-gray-600 flex items-center gap-2">
+                              <span>📱</span>
+                              <span>{drive.driveName}</span>
+                            </h5>
+                            <button
+                              onClick={() => deleteDriveFolder(drive.driveId, drive.driveName)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors text-xs font-semibold"
+                              title="ลบ Drive นี้ออกจากระบบ (ไม่ลบไฟล์จริง)"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                          <FolderTree
+                            folders={filteredFolders}
+                            onSelectFolder={setSelectedFolderId}
+                            selectedFolderId={selectedFolderId}
+                            imageCounts={imageCounts}
+                            onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                            driveId={drive.driveId}
+                          />
                         </div>
-                        <FolderTree
-                          folders={drive.folders}
-                          onSelectFolder={setSelectedFolderId}
-                          selectedFolderId={selectedFolderId}
-                          imageCounts={imageCounts}
-                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                          driveId={drive.driveId}
-                        />
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   {selectedFolderId && (
                     <button
