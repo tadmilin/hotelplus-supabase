@@ -8,8 +8,8 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
 
-// Increase body size limit and timeout for large image uploads (Next.js 13+ App Router)
-export const maxDuration = 60 // seconds
+// 🔥 Increase limits for large image uploads (Hobby plan max: 60s)
+export const maxDuration = 60 // 60 seconds (Vercel Hobby limit)
 export const dynamic = 'force-dynamic'
 
 // Helper function to sanitize filename
@@ -18,6 +18,48 @@ function sanitizeFilename(filename: string): string {
     .replace(/[^a-zA-Z0-9._-]/g, '_') // Replace special chars with underscore
     .replace(/_{2,}/g, '_') // Replace multiple underscores with single
     .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+}
+
+// 🔥 Smart compression ที่รักษาคุณภาพหน้าคน
+async function smartCompress(buffer: Buffer): Promise<{ buffer: Buffer; mimeType: string }> {
+  // 🔥 STRATEGY: บีบไฟล์ให้เหลือไม่เกิน 10MB สำหรับ Cloudinary
+  // แต่รักษาขนาด dimension ใหญ่เพื่อให้หน้าคนชัด
+  
+  const targetSizeMB = 10 // Cloudinary free plan limit
+  const sizeMB = buffer.length / (1024 * 1024)
+  
+  // ถ้าไฟล์เล็กอยู่แล้ว ใช้ quality สูงสุด
+  if (sizeMB <= targetSizeMB) {
+    const result = await sharp(buffer, { failOnError: false })
+      .jpeg({ quality: 95, mozjpeg: true }) // 🔥 quality สูงสุด
+      .toBuffer()
+    return { buffer: result, mimeType: 'image/jpeg' }
+  }
+  
+  // 🔥 ไฟล์ใหญ่: ใช้ progressive compression
+  // เริ่มจาก quality สูง แล้วลดลงจนกว่าจะได้ขนาดที่ต้องการ
+  const qualityLevels = [90, 85, 80, 75, 70, 65]
+  
+  for (const quality of qualityLevels) {
+    const result = await sharp(buffer, { failOnError: false })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer()
+    
+    const resultSizeMB = result.length / (1024 * 1024)
+    console.log(`  📦 Quality ${quality}: ${resultSizeMB.toFixed(2)}MB`)
+    
+    if (resultSizeMB <= targetSizeMB) {
+      return { buffer: result, mimeType: 'image/jpeg' }
+    }
+  }
+  
+  // 🔥 ยังใหญ่เกินไป? ลด dimension แต่รักษาหน้าคน (4K)
+  const result = await sharp(buffer, { failOnError: false })
+    .resize(3840, 3840, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 80, mozjpeg: true })
+    .toBuffer()
+  
+  return { buffer: result, mimeType: 'image/jpeg' }
 }
 
 export async function POST(req: NextRequest) {
@@ -39,39 +81,45 @@ export async function POST(req: NextRequest) {
       
       console.log(`📤 Uploading: ${sanitizedName} (original: ${file.name}, ${originalSizeMB}MB, type: ${file.type})`)
       
-      // Always process through sharp to:
-      // 1. Convert HEIC/HEIF to JPEG (iOS compatibility)
-      // 2. Compress large files > 15MB
-      // 3. Ensure consistent JPEG output for Replicate
-      const needsProcessing = buffer.length > 15 * 1024 * 1024 || 
-                              file.type === 'image/heic' || 
-                              file.type === 'image/heif' ||
-                              file.name.toLowerCase().endsWith('.heic') ||
-                              file.name.toLowerCase().endsWith('.heif')
+      // 🔥 ตรวจสอบว่าเป็น HEIC/HEIF หรือไฟล์ใหญ่
+      const isHeic = file.type === 'image/heic' || 
+                     file.type === 'image/heif' ||
+                     file.name.toLowerCase().endsWith('.heic') ||
+                     file.name.toLowerCase().endsWith('.heif')
+      
+      const needsProcessing = buffer.length > 10 * 1024 * 1024 || isHeic
+      
+      let mimeType = 'image/jpeg'
       
       if (needsProcessing) {
-        console.log(`🔄 Processing image: ${sanitizedName}`)
+        console.log(`🔄 Processing large/HEIC image: ${sanitizedName}`)
         
         try {
-          // Convert to JPEG and optionally compress
-          // Use higher quality (90) and larger max size (3840x3840 for 4K)
-          const compressedBuffer = await sharp(buffer)
-            .resize(3840, 3840, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 90, progressive: true })
-            .toBuffer()
-          
-          buffer = Buffer.from(compressedBuffer)
+          // 🔥 ใช้ smart compression ที่รักษาคุณภาพหน้าคน
+          const result = await smartCompress(buffer)
+          buffer = Buffer.from(result.buffer)
+          mimeType = result.mimeType
           
           const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-          console.log(`✅ Processed: ${originalSizeMB}MB → ${compressedSizeMB}MB (JPEG)`)
+          console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
         } catch (err) {
           console.error(`❌ Failed to process ${sanitizedName}:`, err)
           throw new Error(`Failed to process image: ${sanitizedName}`)
         }
+      } else {
+        // 🔥 ไฟล์เล็ก: แค่แปลงเป็น JPEG quality สูง
+        try {
+          const processed = await sharp(buffer, { failOnError: false })
+            .jpeg({ quality: 95, mozjpeg: true })
+            .toBuffer()
+          buffer = Buffer.from(processed)
+        } catch (err) {
+          console.log(`⚠️ Sharp failed, using original:`, err)
+        }
       }
       
       const base64 = buffer.toString('base64')
-      const dataUri = `data:image/jpeg;base64,${base64}`
+      const dataUri = `data:${mimeType};base64,${base64}`
 
       const result = await cloudinary.uploader.upload(dataUri, {
         folder: 'hotelplus-v2',

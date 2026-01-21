@@ -31,15 +31,28 @@ export async function POST(req: NextRequest) {
     const model = 'google/nano-banana-pro'
     
     // 🔥 ตรวจสอบว่ามีคำว่า "คน" ใน prompt หรือไม่
-    const hasPerson = /คน|ผู้คน|บุคคล|ผู้หญิง|ผู้ชาย|เด็ก|คนไทย|นักท่องเที่ยว|พนักงาน|แขก|person|people|human|man|woman|child|guest|staff|tourist/i.test(prompt)
-    const faceEnhancement = hasPerson ? ', high resolution face, clear facial features, photorealistic portrait, sharp face details' : ''
+    const hasPerson = /คน|ผู้คน|บุคคล|ผู้หญิง|ผู้ชาย|เด็ก|คนไทย|นักท่องเที่ยว|พนักงาน|แขก|person|people|human|man|woman|child|guest|staff|tourist|couple|family|group|portrait/i.test(prompt)
+    
+    // 🔥 Face preservation prompt ที่ละเอียดมากขึ้น
+    const faceEnhancement = hasPerson ? `
+
+[FACE PRESERVATION CRITICAL]
+- Preserve original facial features exactly as they appear in source image
+- Maintain natural skin texture, eye shape, nose structure, mouth details
+- Keep face proportions unchanged (do not distort, stretch, or morph faces)
+- Faces must be sharp, clear, high-resolution with visible details
+- No blurry, smudged, or AI-artifact faces
+- Maintain realistic lighting on faces
+- Eyes must be symmetrical and natural-looking
+- Human faces are the priority - do not crop, obscure, or distort them` : ''
     
     let finalPrompt = prompt
     
     // If template is provided, use template + all images together
     if (templateUrl) {
       // 🔥 รวม USER PROMPT + TEMPLATE INSTRUCTION + FACE ENHANCEMENT
-      finalPrompt = `[USER REQUEST: ${prompt}${faceEnhancement}]
+      finalPrompt = `[USER REQUEST: ${prompt}]
+${faceEnhancement}
 
 [TEMPLATE MODE] รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ทั้งหมด (กราฟิค, กรอบ)
 
@@ -47,10 +60,17 @@ export async function POST(req: NextRequest) {
 1. ใช้ภาพแรก (รูปแรกหลัง Template) เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
 2. ถ้ามีรูปเพิ่ม: ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
 3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับกรอบ)
-4. ปรับแต่งตามคำขอของผู้ใช้: ${prompt}${faceEnhancement}
+4. ปรับแต่งตามคำขอของผู้ใช้: ${prompt}
 
-สิ่งที่ห้ามแก้ไข: กรอบ, ตำแหน่ง Layout
-สิ่งที่สามารถแก้ได้: ภาพพื้นหลังและรูปเล็กทั้งหมด (ต้องเป็นภาพใหม่ที่แนบมา), สี, แสง, ความสว่าง, ตามที่ผู้ใช้ระบุ
+[CRITICAL FACE PRESERVATION]
+- ถ้ามีคนในภาพ: รักษาใบหน้าตามต้นฉบับ ห้ามบิดเบือนหรือเปลี่ยนแปลงใบหน้า
+- Preserve facial features exactly: eyes, nose, mouth, skin texture
+- Keep natural face proportions - no distortion or morphing
+- Faces must remain sharp and high-resolution
+- Human subjects are priority - never crop, blur, or obscure faces
+
+สิ่งที่ห้ามแก้ไข: กรอบ, ตำแหน่ง Layout, ใบหน้าคนต้นฉบับ
+สิ่งที่สามารถแก้ได้: ภาพพื้นหลังและรูปเล็กทั้งหมด (ต้องเป็นภาพใหม่ที่แนบมา), สี, แสง, ความสว่าง
 สิ่งที่ต้องลบออก: ข้อความตัวอักษรและตัวเลขทั้งหมดและโลโก้`
       
       const input: Record<string, unknown> = {
@@ -58,7 +78,7 @@ export async function POST(req: NextRequest) {
         prompt: finalPrompt,
         aspect_ratio: outputSize || 'match_input_image',
         output_format: 'png',
-        resolution: '1K', // ✅ ลดเป็น 1K เพื่อไม่ให้เกิน GPU limit ตอน auto-upscale (2K = 2048x2048 ใหญ่เกินไป)
+        resolution: '2K', // 🔥 เพิ่มเป็น 2K เพื่อให้หน้าคนชัดขึ้น (A100 GPU รองรับ)
       }
 
       const prediction = await replicate.predictions.create({
@@ -89,7 +109,7 @@ export async function POST(req: NextRequest) {
       prompt: prompt + faceEnhancement, // 🔥 เพิ่ม face enhancement ถ้ามีคำว่า "คน"
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
-      resolution: '1K', // ✅ ลดเป็น 1K เพื่อไม่ให้เกิน GPU limit ตอน auto-upscale
+      resolution: '2K', // 🔥 เพิ่มเป็น 2K เพื่อให้หน้าคนชัดขึ้น
     }
 
     const prediction = await replicate.predictions.create({

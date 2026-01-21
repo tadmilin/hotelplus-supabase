@@ -366,43 +366,74 @@ export default function CustomPromptPage() {
     const uploadedImages: DriveImage[] = []
 
     try {
-      // Upload files one by one, with auto-compression if needed
+      // 🔥 Vercel Hobby Plan Limit: 4.5MB body size
+      // ต้องบีบไฟล์ที่ frontend ให้เหลือไม่เกิน 4MB ก่อนส่ง
+      const VERCEL_LIMIT_MB = 4
+      
+      // Upload files one by one, with auto-compression
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
         setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name} (${fileSizeMB}MB)...`)
 
-        // ✅ ไม่มีข้อจำกัดขนาดไฟล์ - อัพโหลดได้ทุกขนาด!
-        // แต่จะบีบอัดอัตโนมัติถ้าใหญ่เกิน 10MB
-
-        // Compress if file is larger than 10MB to optimize performance
-        let fileToUpload = file
+        let fileToUpload: File | Blob = file
         const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
                        file.name.toLowerCase().endsWith('.heic') || 
                        file.name.toLowerCase().endsWith('.heif')
         
-        if (file.size > 10 * 1024 * 1024 && !isHEIC) {
-          setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB)...`)
+        // 🔥 บีบอัดทุกไฟล์ที่ใหญ่กว่า Vercel limit (รวม HEIC ด้วย)
+        if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
+          setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB → <4MB)...`)
           
           try {
             const options = {
-              maxSizeMB: 10,
-              maxWidthOrHeight: 3840, // 4K resolution
+              maxSizeMB: VERCEL_LIMIT_MB, // 🔥 บีบให้เหลือไม่เกิน 4MB
+              maxWidthOrHeight: 3840, // 4K resolution - รักษาคุณภาพหน้าคน
               useWebWorker: true,
               fileType: 'image/jpeg' as const,
+              initialQuality: 0.9, // เริ่มจาก quality สูง
             }
             
             fileToUpload = await imageCompression(file, options)
             const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
             console.log(`✅ Compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+            setStatus(`✅ บีบอัดแล้ว: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
           } catch (err) {
             console.error(`Failed to compress ${file.name}:`, err)
-            alert(`⚠️ ไม่สามารถบีบอัด ${file.name} ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
-            // Server will handle compression
+            // 🔥 ถ้าบีบไม่ได้ ลองใช้ quality ต่ำลง
+            try {
+              setStatus(`🔄 ลองบีบอัดอีกครั้ง ${file.name}...`)
+              const fallbackOptions = {
+                maxSizeMB: VERCEL_LIMIT_MB,
+                maxWidthOrHeight: 2560, // ลด resolution ลง
+                useWebWorker: true,
+                fileType: 'image/jpeg' as const,
+                initialQuality: 0.7,
+              }
+              fileToUpload = await imageCompression(file, fallbackOptions)
+              const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
+              console.log(`✅ Fallback compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
+            } catch (fallbackErr) {
+              console.error(`Fallback compression failed:`, fallbackErr)
+              alert(`❌ ไม่สามารถบีบอัด ${file.name} ได้\nกรุณาลองใช้รูปขนาดเล็กกว่านี้`)
+              continue // ข้ามไฟล์นี้
+            }
           }
         } else if (isHEIC) {
-          console.log(`📱 HEIC/HEIF detected: ${file.name} - server will convert`)
+          // HEIC เล็ก → แปลงเป็น JPEG ที่ frontend
           setStatus(`📱 กำลังแปลงไฟล์ iPhone ${file.name}...`)
+          try {
+            const options = {
+              maxSizeMB: VERCEL_LIMIT_MB,
+              maxWidthOrHeight: 3840,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+            }
+            fileToUpload = await imageCompression(file, options)
+          } catch (err) {
+            console.error(`Failed to convert HEIC:`, err)
+            // ถ้าแปลงไม่ได้ ส่งไป server ให้ handle
+          }
         }
 
         const formData = new FormData()
@@ -1210,15 +1241,19 @@ export default function CustomPromptPage() {
                                            file.name.toLowerCase().endsWith('.heic') || 
                                            file.name.toLowerCase().endsWith('.heif')
                             
-                            if (file.size > 10 * 1024 * 1024 && !isHEIC) {
-                              setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB)...`)
+                            // 🔥 Vercel Hobby limit: 4.5MB
+                            const VERCEL_LIMIT_MB = 4
+                            
+                            if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
+                              setStatus(`🗜️ กำลังบีบอัด Template (${fileSizeMB}MB → <4MB)...`)
                               
                               try {
                                 const options = {
-                                  maxSizeMB: 10,
-                                  maxWidthOrHeight: 3840,
+                                  maxSizeMB: VERCEL_LIMIT_MB,
+                                  maxWidthOrHeight: 3840, // 4K
                                   useWebWorker: true,
                                   fileType: 'image/jpeg' as const,
+                                  initialQuality: 0.9,
                                 }
                                 
                                 fileToUpload = await imageCompression(file, options)
@@ -1226,7 +1261,23 @@ export default function CustomPromptPage() {
                                 console.log(`✅ Template compressed: ${fileSizeMB}MB → ${compressedSizeMB}MB`)
                               } catch (err) {
                                 console.error('Failed to compress template:', err)
-                                alert(`⚠️ ไม่สามารถบีบอัด Template ได้\nเซิร์ฟเวอร์จะประมวลผลต่อ`)
+                                alert(`❌ ไม่สามารถบีบอัด Template ได้\nกรุณาลองใช้รูปขนาดเล็กกว่านี้`)
+                                setUploadingFiles(false)
+                                e.target.value = ''
+                                return
+                              }
+                            } else if (isHEIC) {
+                              // HEIC เล็ก → แปลงเป็น JPEG
+                              try {
+                                const options = {
+                                  maxSizeMB: VERCEL_LIMIT_MB,
+                                  maxWidthOrHeight: 3840,
+                                  useWebWorker: true,
+                                  fileType: 'image/jpeg' as const,
+                                }
+                                fileToUpload = await imageCompression(file, options)
+                              } catch (err) {
+                                console.error('Failed to convert HEIC:', err)
                               }
                             }
                             

@@ -1,8 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDriveClient } from '@/lib/google-drive'
-import { uploadBase64ToCloudinary } from '@/lib/cloudinary'
+import { uploadImageFullSize } from '@/lib/cloudinary' // 🔥 ใช้ full-size เพื่อรักษาคุณภาพหน้าคน
 import sharp from 'sharp'
 import { GaxiosResponse } from 'gaxios'
+
+// 🔥 Vercel Hobby plan limit: 60 seconds
+export const maxDuration = 60
+
+// 🔥 Smart compression ที่รักษาคุณภาพหน้าคน
+// ใช้ quality-based compression ก่อน resize
+async function smartCompress(buffer: Buffer): Promise<{ buffer: Buffer; mimeType: string }> {
+  const targetSizeMB = 10 // Cloudinary limit
+  const sizeMB = buffer.length / (1024 * 1024)
+  
+  // ถ้าไฟล์เล็กอยู่แล้ว ใช้ quality สูงสุด
+  if (sizeMB <= targetSizeMB) {
+    const result = await sharp(buffer, { failOnError: false })
+      .jpeg({ quality: 95, mozjpeg: true })
+      .toBuffer()
+    return { buffer: result, mimeType: 'image/jpeg' }
+  }
+  
+  // 🔥 ไฟล์ใหญ่: ใช้ progressive compression (ลด quality ก่อน, ไม่ลด dimension)
+  const qualityLevels = [90, 85, 80, 75, 70, 65]
+  
+  for (const quality of qualityLevels) {
+    const result = await sharp(buffer, { failOnError: false })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer()
+    
+    const resultSizeMB = result.length / (1024 * 1024)
+    console.log(`  📦 Quality ${quality}: ${resultSizeMB.toFixed(2)}MB`)
+    
+    if (resultSizeMB <= targetSizeMB) {
+      return { buffer: result, mimeType: 'image/jpeg' }
+    }
+  }
+  
+  // 🔥 ยังใหญ่เกินไป? ลด dimension แต่ยังรักษา 4K (3840px)
+  const result = await sharp(buffer, { failOnError: false })
+    .resize(3840, 3840, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 80, mozjpeg: true })
+    .toBuffer()
+  
+  return { buffer: result, mimeType: 'image/jpeg' }
+}
 
 export async function POST(req: NextRequest) {
   let attempt = 0
@@ -53,99 +95,45 @@ export async function POST(req: NextRequest) {
       const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
       console.log(`📥 Downloaded: ${originalSizeMB}MB`)
       
-      // ถ้าไฟล์ใหญ่มากๆ (>20MB) → บีบแรงสุด
+      // 🔥 ตรวจสอบ format พิเศษ
       const ext = sanitizedName.toLowerCase().split('.').pop() || 'jpg'
       const isHeic = ext === 'heic' || ext === 'heif'
       const isGif = ext === 'gif'
-      const isPng = ext === 'png'
-      const isWebp = ext === 'webp'
       
-      // GIF ไม่จับยุ่ง
+      // GIF ไม่จับยุ่ง - 🔥 ใช้ full-size
       if (isGif) {
-        console.log(`🎬 GIF: Upload as-is`)
+        console.log(`🎬 GIF: Upload as-is (full-size)`)
         const base64 = buffer.toString('base64')
-        const url = await uploadBase64ToCloudinary(`data:image/gif;base64,${base64}`, 'hotelplus-v2')
+        const url = await uploadImageFullSize(`data:image/gif;base64,${base64}`, 'hotelplus-v2')
         return NextResponse.json({ url })
       }
       
-      // HEIC → ให้ Cloudinary handle
+      // HEIC → ให้ Cloudinary handle - 🔥 ใช้ full-size
       if (isHeic) {
-        console.log(`🔄 HEIC: Let Cloudinary convert`)
+        console.log(`🔄 HEIC: Let Cloudinary convert (full-size)`)
         const base64 = buffer.toString('base64')
-        const url = await uploadBase64ToCloudinary(`data:application/octet-stream;base64,${base64}`, 'hotelplus-v2')
+        const url = await uploadImageFullSize(`data:application/octet-stream;base64,${base64}`, 'hotelplus-v2')
         return NextResponse.json({ url })
       }
       
-      // รูปอื่นๆ → บีบตามขนาด
+      // 🔥 รูปอื่นๆ → ใช้ Smart Compression ที่รักษาคุณภาพหน้าคน
       let mimeType = 'image/jpeg'
-      let maxDimension = 3000
-      let quality = 85
-      
-      // ไฟล์ใหญ่ → บีบแรงขึ้น
-      if (buffer.length > 20 * 1024 * 1024) {
-        maxDimension = 2500
-        quality = 75
-        console.log(`🔥 Large file (${originalSizeMB}MB): Aggressive compression`)
-      } else if (buffer.length > 10 * 1024 * 1024) {
-        maxDimension = 2800
-        quality = 80
-        console.log(`🔄 Medium file (${originalSizeMB}MB): Moderate compression`)
-      } else {
-        console.log(`✅ Small file (${originalSizeMB}MB): Minimal compression`)
-      }
       
       try {
-        let sharpInstance = sharp(buffer, { failOnError: false })
-          .resize(maxDimension, maxDimension, { 
-            fit: 'inside', 
-            withoutEnlargement: true 
-          })
+        console.log(`🔄 Smart compressing: ${originalSizeMB}MB...`)
+        const result = await smartCompress(buffer)
+        buffer = result.buffer
+        mimeType = result.mimeType
         
-        // เลือก format
-        if (isPng && buffer.length < 5 * 1024 * 1024) {
-          // PNG เล็ก → รักษา PNG
-          sharpInstance = sharpInstance.png({ quality, compressionLevel: 9 })
-          mimeType = 'image/png'
-        } else if (isWebp) {
-          sharpInstance = sharpInstance.webp({ quality })
-          mimeType = 'image/webp'
-        } else {
-          // Default: JPEG (รองรับทุกอย่าง)
-          sharpInstance = sharpInstance.jpeg({ quality, mozjpeg: true })
-          mimeType = 'image/jpeg'
-        }
-        
-        buffer = await sharpInstance.toBuffer()
-        let finalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-        console.log(`✅ Processed: ${originalSizeMB}MB → ${finalSizeMB}MB`)
-        
-        // 🔥 Cloudinary Base64 limit: ~60MB (~45MB after encoding)
-        const maxBase64Size = 45 * 1024 * 1024 // 45MB safe limit
-        if (buffer.length > maxBase64Size) {
-          console.log(`⚠️ File too large (${finalSizeMB}MB > 45MB), compressing harder...`)
-          
-          // บีบแรงสุด: 2000px, quality 60
-          buffer = await sharp(buffer, { failOnError: false })
-            .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 60, mozjpeg: true })
-            .toBuffer()
-          
-          finalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-          mimeType = 'image/jpeg'
-          console.log(`✅ Extra compression: ${finalSizeMB}MB`)
-          
-          // ถ้ายังใหญ่ → error
-          if (buffer.length > maxBase64Size) {
-            throw new Error(`File too large after compression: ${finalSizeMB}MB (max 45MB for upload)`)
-          }
-        }
+        const finalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+        console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${finalSizeMB}MB`)
         
       } catch (sharpError) {
         console.error(`⚠️ Sharp processing failed:`, sharpError)
         // ถ้า Sharp ล้ม → แปลงเป็น JPEG อย่างเดียว
         try {
           buffer = await sharp(buffer, { failOnError: false })
-            .jpeg({ quality: 70 })
+            .jpeg({ quality: 85 })
             .toBuffer()
           mimeType = 'image/jpeg'
           console.log(`✅ Fallback: Converted to JPEG`)
@@ -157,10 +145,10 @@ export async function POST(req: NextRequest) {
       
       const base64 = `data:${mimeType};base64,${buffer.toString('base64')}`
       
-      // Upload to Cloudinary with retry
-      console.log(`☁️ Uploading to Cloudinary...`)
+      // Upload to Cloudinary with retry - 🔥 ใช้ full-size เพื่อรักษาคุณภาพหน้าคน
+      console.log(`☁️ Uploading to Cloudinary (full-size)...`)
       try {
-        const url = await uploadBase64ToCloudinary(base64, 'hotelplus-v2')
+        const url = await uploadImageFullSize(base64, 'hotelplus-v2')
         console.log(`✅ Success: ${url}`)
         return NextResponse.json({ url })
       } catch (uploadError) {

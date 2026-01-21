@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { User } from '@supabase/supabase-js'
+import imageCompression from 'browser-image-compression'
 
 export default function UpscalePage() {
   const router = useRouter()
@@ -18,6 +19,7 @@ export default function UpscalePage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [status, setStatus] = useState('')
 
   useEffect(() => {
     async function checkAuth() {
@@ -35,24 +37,45 @@ export default function UpscalePage() {
     if (!files || files.length === 0) return
 
     const file = files[0]
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
     
-    if (!validTypes.includes(file.type)) {
-      alert('รองรับเฉพาะ JPG, PNG, WebP')
-      return
-    }
-
-    const maxSize = 10 * 1024 * 1024
-    if (file.size > maxSize) {
-      alert('ไฟล์ใหญ่เกินไป (เกิน 10MB)')
+    // 🔥 รองรับ HEIC/HEIF ด้วย
+    const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                   file.name.toLowerCase().endsWith('.heic') || 
+                   file.name.toLowerCase().endsWith('.heif')
+    
+    if (!validTypes.includes(file.type) && !isHEIC) {
+      alert('รองรับเฉพาะ JPG, PNG, WebP, HEIC')
       return
     }
 
     setUploadingFile(true)
+    
+    // 🔥 Vercel Hobby Plan Limit: 4.5MB body size
+    const VERCEL_LIMIT_MB = 4
+    let fileToUpload: File | Blob = file
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
 
     try {
+      // 🔥 บีบอัดไฟล์ใหญ่ก่อนอัพโหลด
+      if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
+        setStatus(`🗄️ กำลังบีบอัด ${fileSizeMB}MB → <4MB...`)
+        
+        const options = {
+          maxSizeMB: VERCEL_LIMIT_MB,
+          maxWidthOrHeight: 3840, // 4K
+          useWebWorker: true,
+          fileType: 'image/jpeg' as const,
+          initialQuality: 0.9,
+        }
+        
+        fileToUpload = await imageCompression(file, options)
+        const compressedSizeMB = (fileToUpload.size / (1024 * 1024)).toFixed(2)
+        setStatus(`✅ บีบอัดแล้ว: ${compressedSizeMB}MB`)
+      }
+      
       const formData = new FormData()
-      formData.append('files', file)
+      formData.append('files', fileToUpload)
 
       const res = await fetch('/api/upload-images', {
         method: 'POST',
@@ -171,6 +194,13 @@ export default function UpscalePage() {
           {error && (
             <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg">
               ⚠️ {error}
+            </div>
+          )}
+
+          {/* Status */}
+          {status && (
+            <div className="bg-blue-50 border-2 border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+              {status}
             </div>
           )}
 

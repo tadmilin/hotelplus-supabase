@@ -23,6 +23,25 @@ export async function uploadToCloudinary(imageUrl: string, folder: string = 'hot
   }
 }
 
+// 🔥 สำหรับรูปที่จะส่งไป Replicate - ไม่ resize เพื่อรักษาคุณภาพหน้าคน
+// Nano Banana Pro ต้องการรูปที่มีความละเอียดสูงเพื่อ detect หน้าได้ดี
+export async function uploadToCloudinaryForReplicate(imageUrl: string, folder: string = 'hotelplus-replicate') {
+  try {
+    const result = await cloudinary.uploader.upload(imageUrl, {
+      folder,
+      resource_type: 'image',
+      // 🔥 ไม่ resize - รักษาขนาดเต็มเพื่อให้ AI detect หน้าได้ดีขึ้น
+      // ถ้ารูปใหญ่มาก Replicate จะ handle เอง
+      quality: 'auto:best', // รักษาคุณภาพสูงสุด
+      fetch_format: 'auto', // ให้ Cloudinary เลือก format ที่ดีที่สุด
+    })
+    return result.secure_url
+  } catch (error) {
+    console.error('Cloudinary upload error:', error)
+    throw error
+  }
+}
+
 // สำหรับ upscaled images - เก็บขนาดเต็ม
 export async function uploadToCloudinaryFullSize(imageUrl: string, folder: string = 'hotelplus') {
   try {

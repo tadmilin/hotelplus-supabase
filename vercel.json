@@ -2,6 +2,18 @@
   "functions": {
     "app/api/upload-images/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/drive/download-and-upload/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/replicate/custom-prompt/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/replicate/gpt-with-template/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/webhooks/replicate/route.ts": {
+      "maxDuration": 60
     }
   }
 }

@@ -19,9 +19,9 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
-    // Increase body size limit for large image uploads (50MB)
+    // 🔥 Increase body size limit for large image uploads (100MB)
     serverActions: {
-      bodySizeLimit: '50mb',
+      bodySizeLimit: '100mb',
     },
   },
 };
