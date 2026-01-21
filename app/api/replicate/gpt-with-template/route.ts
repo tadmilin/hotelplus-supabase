@@ -41,32 +41,56 @@ export async function POST(request: NextRequest) {
             console.log(`🔄 Creating ${inputImages.length} separate predictions...`)
             
             for (let i = 0; i < inputImages.length; i++) {
-                try {
-                    const singleInput: Record<string, unknown> = {
-                        prompt: prompt,
-                        aspect_ratio: aspectRatio || '1:1',
-                        number_of_images: 1,
-                        quality: quality || 'auto',
-                        output_format: outputFormat || 'webp',
-                        background: background || 'auto',
-                        moderation: moderation || 'auto',
-                        input_fidelity: inputFidelity || 'low',
-                        output_compression: outputCompression || 90,
-                        input_images: [inputImages[i]], // ส่งทีละรูป
+                let retryCount = 0
+                const maxRetries = 3
+                let success = false
+                
+                while (!success && retryCount <= maxRetries) {
+                    try {
+                        const singleInput: Record<string, unknown> = {
+                            prompt: prompt,
+                            aspect_ratio: aspectRatio || '1:1',
+                            number_of_images: 1,
+                            quality: quality || 'auto',
+                            output_format: outputFormat || 'webp',
+                            background: background || 'auto',
+                            moderation: moderation || 'auto',
+                            input_fidelity: inputFidelity || 'low',
+                            output_compression: outputCompression || 90,
+                            input_images: [inputImages[i]], // ส่งทีละรูป
+                        }
+
+                        const gptPrediction = await replicate.predictions.create({
+                            model: 'openai/gpt-image-1.5',
+                            input: singleInput,
+                            webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                            webhook_events_filter: ['completed'],
+                        })
+
+                        gptPredictionIds.push(gptPrediction.id)
+                        console.log(`  ✅ Prediction ${i + 1}/${inputImages.length} created:`, gptPrediction.id)
+                        success = true
+                    } catch (predError: unknown) {
+                        // Check if it's a rate limit error (429)
+                        const error = predError as { response?: { status?: number; headers?: { get: (key: string) => string | null } }; message?: string }
+                        if (error?.response?.status === 429) {
+                            retryCount++
+                            const retryAfter = error?.response?.headers?.get('retry-after') || '10'
+                            const waitTime = parseInt(retryAfter) * 1000 + 1000 // Add 1s buffer
+                            
+                            if (retryCount <= maxRetries) {
+                                console.log(`  ⏳ Rate limit hit. Waiting ${waitTime/1000}s before retry ${retryCount}/${maxRetries}...`)
+                                await new Promise(resolve => setTimeout(resolve, waitTime))
+                            } else {
+                                console.error(`  ❌ Failed after ${maxRetries} retries for prediction ${i + 1}:`, error.message)
+                                throw new Error(`Rate limit exceeded for image ${i + 1} after ${maxRetries} retries`)
+                            }
+                        } else {
+                            // Non-rate-limit error, throw immediately
+                            console.error(`  ❌ Failed to create prediction ${i + 1}:`, error)
+                            throw new Error(`Failed to create prediction for image ${i + 1}: ${error.message || 'Unknown error'}`)
+                        }
                     }
-
-                    const gptPrediction = await replicate.predictions.create({
-                        model: 'openai/gpt-image-1.5',
-                        input: singleInput,
-                        webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
-                        webhook_events_filter: ['completed'],
-                    })
-
-                    gptPredictionIds.push(gptPrediction.id)
-                    console.log(`  ✅ Prediction ${i + 1}/${inputImages.length} created:`, gptPrediction.id)
-                } catch (predError) {
-                    console.error(`  ❌ Failed to create prediction ${i + 1}:`, predError)
-                    throw new Error(`Failed to create prediction for image ${i + 1}`)
                 }
             }
         } else {
