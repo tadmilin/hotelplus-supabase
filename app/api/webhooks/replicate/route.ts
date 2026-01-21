@@ -315,9 +315,7 @@ export async function POST(req: NextRequest) {
               .eq('id', job.id)
             
             // สร้าง Step 2: Nano Banana Pro
-            const templatePrompt = `${metadata.prompt || ''}
-
-[TEMPLATE MODE]
+            const templatePrompt = `[TEMPLATE MODE]
 ใช้ภาพแรกเป็น template รักษา Layout และกรอบดีไซน์ไว้ให้เหมือน 100%
 
 ขั้นตอน:
