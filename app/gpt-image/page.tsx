@@ -25,10 +25,6 @@ export default function GptImagePage() {
   const [numImages, setNumImages] = useState(1)
   const [quality, setQuality] = useState('auto')
   const [outputFormat, setOutputFormat] = useState('webp')
-  const [background, setBackground] = useState('auto')
-  const [moderation, setModeration] = useState('auto')
-  const [inputFidelity, setInputFidelity] = useState('low')
-  const [outputCompression, setOutputCompression] = useState(90)
   const [inputImages, setInputImages] = useState<File[]>([])
   const [creating, setCreating] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -559,10 +555,6 @@ export default function GptImagePage() {
         aspect_ratio: aspectRatio,
         quality: quality,
         output_format: outputFormat,
-        background: background,
-        moderation: moderation,
-        input_fidelity: inputFidelity,
-        output_compression: outputCompression,
         number_of_images: numImages,
         image_urls: imageUrls,
         output_urls: [],
@@ -703,10 +695,6 @@ export default function GptImagePage() {
         numberOfImages: numImages,
         quality: quality,
         outputFormat: outputFormat,
-        background: background,
-        moderation: moderation,
-        inputFidelity: inputFidelity,
-        outputCompression: outputCompression,
         inputImages: imageUrls,
       }
 
@@ -1338,80 +1326,6 @@ export default function GptImagePage() {
               <option value="webp">WebP (แนะนำ - ไฟล์เล็ก คุณภาพดี)</option>
               <option value="png">PNG (คุณภาพสูง - ไฟล์ใหญ่)</option>
               <option value="jpg">JPG (ไฟล์กลาง)</option>
-            </select>
-          </div>
-
-          {/* Background */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              🎭 พื้นหลัง (Background)
-            </label>
-            <select
-              value={background}
-              onChange={(e) => setBackground(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              disabled={creating}
-            >
-              <option value="auto">Auto (ปรับอัตโนมัติ)</option>
-              <option value="opaque">Opaque (ทึบแสง)</option>
-              <option value="transparent">Transparent (โปร่งใส)</option>
-            </select>
-          </div>
-
-          {/* Input Fidelity */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              🎯 ความยึดติดกับรูปต้นฉบับ (Input Fidelity)
-            </label>
-            <select
-              value={inputFidelity}
-              onChange={(e) => setInputFidelity(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              disabled={creating}
-            >
-              <option value="low">Low (ยืดหยุ่น - ปรับเปลี่ยนได้มาก)</option>
-              <option value="medium">Medium (สมดุล)</option>
-              <option value="high">High (ยึดติดกับต้นฉบับมาก)</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-2">
-              💡 ใช้เมื่ออัพโหลดรูปต้นฉบับ - ควบคุมว่าจะรักษาสไตล์และใบหน้าเดิมมากแค่ไหน
-            </p>
-          </div>
-
-          {/* Output Compression */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              🗜️ การบีบอัด (Output Compression): {outputCompression}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={outputCompression}
-              onChange={(e) => setOutputCompression(parseInt(e.target.value))}
-              className="w-full"
-              disabled={creating}
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>ไฟล์เล็ก (0%)</span>
-              <span>คุณภาพสูง (100%)</span>
-            </div>
-          </div>
-
-          {/* Moderation */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              🛡️ ระดับการกลั่นกรองเนื้อหา (Moderation)
-            </label>
-            <select
-              value={moderation}
-              onChange={(e) => setModeration(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              disabled={creating}
-            >
-              <option value="auto">Auto (แนะนำ)</option>
-              <option value="strict">Strict (เข้มงวด)</option>
-              <option value="relaxed">Relaxed (ผ่อนปรน)</option>
             </select>
           </div>
 

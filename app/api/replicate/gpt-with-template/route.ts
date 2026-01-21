@@ -46,10 +46,6 @@ export async function POST(request: NextRequest) {
                     number_of_images: 1, // สร้างรูปเดียวต่อ input
                     quality: quality || 'auto',
                     output_format: outputFormat || 'webp',
-                    background: background || 'auto',
-                    moderation: moderation || 'auto',
-                    input_fidelity: inputFidelity || 'low',
-                    output_compression: outputCompression || 90,
                     input_images: [inputImages[i]], // ส่งทีละรูป
                 }
 
@@ -74,10 +70,6 @@ export async function POST(request: NextRequest) {
                 number_of_images: numberOfImages || 1,
                 quality: quality || 'auto',
                 output_format: outputFormat || 'webp',
-                background: background || 'auto',
-                moderation: moderation || 'auto',
-                input_fidelity: inputFidelity || 'low',
-                output_compression: outputCompression || 90,
             }
 
             const gptPrediction = await replicate.predictions.create({

@@ -14,10 +14,6 @@ export async function POST(req: NextRequest) {
       numberOfImages, 
       quality, 
       outputFormat,
-      background,
-      moderation,
-      inputFidelity,
-      outputCompression,
       inputImages 
     } = await req.json()
 
@@ -28,10 +24,6 @@ export async function POST(req: NextRequest) {
       numberOfImages,
       quality,
       outputFormat,
-      background,
-      moderation,
-      inputFidelity,
-      outputCompression,
       inputImageCount: inputImages?.length || 0,
     })
 
@@ -51,10 +43,6 @@ export async function POST(req: NextRequest) {
       number_of_images: numberOfImages || 1,
       quality: quality || 'auto',
       output_format: outputFormat || 'webp',
-      background: background || 'auto',
-      moderation: moderation || 'auto',
-      input_fidelity: inputFidelity || 'low',
-      output_compression: outputCompression || 90,
     }
 
     // Add input images if provided (must be array of URLs)
