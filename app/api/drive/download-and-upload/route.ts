@@ -47,6 +47,16 @@ async function smartCompress(buffer: Buffer): Promise<{ buffer: Buffer; mimeType
 }
 
 export async function POST(req: NextRequest) {
+  // 🔥 อ่าน body ก่อน retry loop เพื่อไม่ให้เกิด "Body has already been read"
+  const { fileId, fileName } = await req.json()
+
+  if (!fileId) {
+    return NextResponse.json({ error: 'File ID required' }, { status: 400 })
+  }
+
+  // Sanitize filename
+  const sanitizedName = (fileName || 'untitled.jpg').replace(/[^\w\s.-]/gi, '_').replace(/\s+/g, '_')
+  
   let attempt = 0
   const maxAttempts = 2
   
@@ -54,14 +64,6 @@ export async function POST(req: NextRequest) {
     attempt++
     
     try {
-      const { fileId, fileName } = await req.json()
-
-      if (!fileId) {
-        return NextResponse.json({ error: 'File ID required' }, { status: 400 })
-      }
-
-      // Sanitize filename
-      const sanitizedName = (fileName || 'untitled.jpg').replace(/[^\w\s.-]/gi, '_').replace(/\s+/g, '_')
       console.log(`📂 [Attempt ${attempt}/${maxAttempts}] Processing: ${sanitizedName}`)
 
       const drive = getDriveClient()

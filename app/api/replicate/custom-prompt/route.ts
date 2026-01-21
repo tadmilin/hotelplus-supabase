@@ -34,10 +34,8 @@ export async function POST(req: NextRequest) {
     
     // If template is provided, use template + all images together
     if (templateUrl) {
-      // Template mode: user prompt + template instructions
-      finalPrompt = `[USER REQUEST: ${prompt}]
-
-[TEMPLATE MODE]ใช้ inputภาพแรกเป็นตัวอย่าง template รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ให้เหมือน100% (กราฟิค, กรอบ)
+      // Template mode: template instructions + user prompt
+      finalPrompt = `[TEMPLATE MODE]ใช้ inputภาพแรกเป็นตัวอย่าง template รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ให้เหมือน100% (กราฟิค, กรอบ)
 
 ขั้นตอน:
 1. ปรับแต่งภาพinput หลังรูปแรก(ตัวอย่างtemplate)ทั้งหมดตามคำขอ: ${prompt}
