@@ -180,17 +180,27 @@ export async function POST(req: NextRequest) {
     
     if (!job) {
       console.log('🔍 No job found by replicate_id, searching in metadata...')
+      // ค้นหา job ที่มี gptPredictions ใน metadata (pipeline jobs)
+      // Filter เฉพาะ pending/processing และ created ใน 24 ชม. ล่าสุด
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       const { data: metadataJobs } = await supabaseAdmin
         .from('jobs')
         .select('*')
         .not('metadata', 'is', null)
-        .limit(100)
+        .in('status', ['pending', 'processing', 'processing_template'])
+        .gte('created_at', oneDayAgo)
+        .order('created_at', { ascending: false })
+        .limit(200)
       
       if (metadataJobs) {
         job = metadataJobs.find(j => {
           const meta = j.metadata as { gptPredictions?: string[] } | null
           return meta?.gptPredictions?.includes(replicateId)
         }) || null
+        
+        if (job) {
+          console.log('✅ Found job in metadata search:', job.id)
+        }
       }
     }
 
