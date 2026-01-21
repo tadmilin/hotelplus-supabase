@@ -140,6 +140,7 @@ export async function POST(request: NextRequest) {
                     templateUrl: templateUrl,
                     step: 1,
                     prompt: prompt,
+                    aspectRatio: aspectRatio, // เก็บ aspect ratio ไว้ใช้ step 2
                     gptPredictions: gptPredictionIds,
                     totalPredictions: gptPredictionIds.length,
                     completedPredictions: [], // webhook จะเพิ่มเมื่อเสร็จ

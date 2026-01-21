@@ -243,6 +243,7 @@ export async function POST(req: NextRequest) {
         templateUrl?: string; 
         step?: number; 
         prompt?: string;
+        aspectRatio?: string;
         gptPredictions?: string[];
         totalPredictions?: number;
         completedPredictions?: Array<{ id: string; urls: string[] }>;
@@ -314,44 +315,44 @@ export async function POST(req: NextRequest) {
               })
               .eq('id', job.id)
             
-            // สร้าง Step 2: Nano Banana Pro
+            // สร้าง Step 2: GPT Image 1.5 with Template
             const templatePrompt = `[TEMPLATE MODE]
-ใช้ภาพแรกเป็น template รักษา Layout และกรอบดีไซน์ไว้ให้เหมือน 100%
+Use the first image as the template. Preserve the exact layout and design frame 100%.
 
-ขั้นตอน:
-1. ใช้รูปแรกหลัง Template เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
-2. รูปลำดับถัดมา ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
-3. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง (ไม่ทับกรอบ)
-4. ลบข้อความตัวอักษร ตัวเลข และโลโก้ออก
-5. รักษาดีไซน์ โทนสี และองค์ประกอบศิลป์จาก template`
+Steps:
+1. Use the first image after the template as the main image / background / hero image at the largest size.
+2. Use subsequent images as smaller supporting images placed in appropriate secondary positions.
+3. Place all new images on background layers only (do not overlap or cover the design frames).
+4. Remove all text, numbers, and logos.
+5. Preserve the original template's design, color tone, and artistic composition.`
 
-            const nanoInput = {
-              image_input: [metadata.templateUrl, ...allGptUrls],
+            const gptTemplateInput = {
               prompt: templatePrompt,
-              aspect_ratio: 'match_input_image',
-              output_format: 'png',
-              resolution: '1K', // ใช้ 1K เพราะจะมี auto-upscale x2 ต่อ (1K → 2K ปลอดภัย)
-              safety_filter_level: 'block_only_high', // เปิด permissive mode
+              input_images: [metadata.templateUrl, ...allGptUrls],
+              aspect_ratio: metadata.aspectRatio || '1:1', // ใช้ค่าเดียวกับ step 1
+              number_of_images: 1,
+              quality: 'auto',
+              output_format: 'webp',
             }
 
             try {
-              const nanoPrediction = await replicate.predictions.create({
-                model: 'google/nano-banana-pro',
-                input: nanoInput,
+              const gptTemplatePrediction = await replicate.predictions.create({
+                model: 'openai/gpt-image-1.5',
+                input: gptTemplateInput,
                 webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
                 webhook_events_filter: ['completed'],
               })
 
-              // Update with Nano prediction ID and step 2 (ใช้ freshMetadata แทน metadata เดิม)
+              // Update with GPT Template prediction ID and step 2
               await supabaseAdmin
                 .from('jobs')
                 .update({
-                  replicate_id: nanoPrediction.id,
-                  metadata: { ...freshMetadata, step: 2, completedPredictions: updatedCompleted, nanoStartedAt: new Date().toISOString() }
+                  replicate_id: gptTemplatePrediction.id,
+                  metadata: { ...freshMetadata, step: 2, completedPredictions: updatedCompleted, templateStartedAt: new Date().toISOString() }
                 })
                 .eq('id', job.id)
 
-              console.log('✅ Step 2 started:', nanoPrediction.id)
+              console.log('✅ Step 2 (GPT Template) started:', gptTemplatePrediction.id)
             } catch (error) {
               console.error('❌ Step 2 failed:', error)
               const errorMsg = error instanceof Error ? error.message : 'Unknown error'
