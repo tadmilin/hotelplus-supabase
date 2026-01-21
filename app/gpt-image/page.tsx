@@ -553,24 +553,40 @@ export default function GptImagePage() {
           
           try {
             const templateImg = templateImages.find(img => img.url === selectedTemplateUrl)
-            if (templateImg) {
-              const response = await fetch('/api/drive/download-and-upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  fileId: templateImg.id,
-                  fileName: templateImg.name,
-                }),
-              })
-
-              if (!response.ok) {
-                throw new Error('ไม่สามารถแปลง Template จาก Google Drive ได้')
-              }
-
-              const data = await response.json()
-              finalTemplateUrl = data.url
-              console.log('✅ Drive template converted:', finalTemplateUrl)
+            
+            if (!templateImg) {
+              throw new Error('ไม่พบไฟล์ Template ที่เลือก กรุณาเลือกใหม่')
             }
+            
+            if (!templateImg.id || !templateImg.name) {
+              throw new Error('ข้อมูล Template ไม่สมบูรณ์ (ไม่มี ID หรือชื่อไฟล์)')
+            }
+            
+            console.log(`📤 Processing template: ${templateImg.name} (ID: ${templateImg.id})`)
+            
+            const response = await fetch('/api/drive/download-and-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fileId: templateImg.id,
+                fileName: templateImg.name,
+              }),
+            })
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}))
+              const errorMsg = errorData.error || 'Unknown error'
+              throw new Error(`ไม่สามารถแปลง Template ได้: ${errorMsg}`)
+            }
+
+            const data = await response.json()
+            
+            if (!data.url) {
+              throw new Error('API ไม่ส่ง URL กลับมา')
+            }
+            
+            finalTemplateUrl = data.url
+            console.log('✅ Drive template converted:', finalTemplateUrl)
           } catch (templateError) {
             await supabase
               .from('jobs')

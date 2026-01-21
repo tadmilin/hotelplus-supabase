@@ -11,9 +11,9 @@ export async function uploadToCloudinary(imageUrl: string, folder: string = 'hot
     const result = await cloudinary.uploader.upload(imageUrl, {
       folder,
       resource_type: 'image',
-      // Resize to max 1024px to fit in GPU memory (for Replicate)
+      // Resize to ~1440p for better face detail
       transformation: [
-        { width: 1024, height: 1024, crop: "limit" }
+        { width: 1440, height: 1440, crop: "limit" }
       ]
     })
     return result.secure_url
@@ -44,9 +44,9 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
       folder,
       resource_type: 'image',
       format: 'jpg', // บังคับแปลงเป็น JPEG (รองรับทุก format รวม HEIC)
-      // Resize to max 1024px to fit in GPU memory (for Replicate)
+      // Resize to ~1440p (2560x1440) for better quality (ใกล้ max ของ Real-ESRGAN)
       transformation: [
-        { width: 1024, height: 1024, crop: "limit" }
+        { width: 1440, height: 1440, crop: "limit" }
       ]
     })
     return result.secure_url

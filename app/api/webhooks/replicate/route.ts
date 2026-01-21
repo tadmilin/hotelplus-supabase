@@ -280,8 +280,14 @@ export async function POST(req: NextRequest) {
               // Call Replicate API directly (more reliable than self-fetch)
               console.log('🚀 Triggering Replicate Upscale for:', upscaleJob.id)
               
+              // 🔍 Check if we should use A100 for large images
+              // Real-ESRGAN on T4 GPU limit: ~1448x1448 pixels (2,096,704 total)
+              // If input is 2K (2048x2048 = 4.1M pixels), use A100 version
+              const useA100 = false // TODO: Add image size check if needed
+              const model = useA100 ? 'daanelson/real-esrgan-a100' : 'nightmareai/real-esrgan'
+              
               const prediction = await replicate.predictions.create({
-                model: 'nightmareai/real-esrgan',
+                model: model,
                 input: {
                   image: outputUrl,
                   scale: 2,
