@@ -331,8 +331,8 @@ Steps:
               input_images: [metadata.templateUrl, ...allGptUrls],
               aspect_ratio: metadata.aspectRatio || '1:1', // ใช้ค่าเดียวกับ step 1
               number_of_images: 1,
-              quality: 'auto',
-              output_format: 'webp',
+              quality: 'auto', // hardcode เพื่อป้องกัน upscale error
+              output_format: 'webp', // ไฟล์เล็ก คุณภาพดี
             }
 
             try {

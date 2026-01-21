@@ -1385,45 +1385,6 @@ export default function GptImagePage() {
               disabled={creating}
             />
           </div>
-
-          {/* Quality */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              ⭐ คุณภาพ (Quality)
-            </label>
-            <select
-              value={quality}
-              onChange={(e) => setQuality(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              disabled={creating}
-            >
-              <option value="auto">Auto (แนะนำ - ปรับอัตโนมัติ)</option>
-              <option value="low">Low (เร็ว - ราคาถูก)</option>
-              <option value="medium">Medium (สมดุล)</option>
-              <option value="high">High (คุณภาพสูงสุด)</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-2">
-              💰 ราคา: Low ~$0.013/รูป | Medium ~$0.05/รูป | High/Auto ~$0.136/รูป
-            </p>
-          </div>
-
-          {/* Output Format */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-3">
-              📦 รูปแบบไฟล์ (Output Format)
-            </label>
-            <select
-              value={outputFormat}
-              onChange={(e) => setOutputFormat(e.target.value)}
-              className="w-full border-2 border-gray-300 rounded-lg px-4 py-3 text-black focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              disabled={creating}
-            >
-              <option value="webp">WebP (แนะนำ - ไฟล์เล็ก คุณภาพดี)</option>
-              <option value="png">PNG (คุณภาพสูง - ไฟล์ใหญ่)</option>
-              <option value="jpg">JPG (ไฟล์กลาง)</option>
-            </select>
-          </div>
-
           {/* Submit Button */}
           <div className="pt-4">
             <button

@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: NextRequest) {
     const body = await request.json()
-    const { jobId, prompt, templateUrl, aspectRatio, numberOfImages, quality, outputFormat, background, moderation, inputFidelity, outputCompression, inputImages } = body
+    const { jobId, prompt, templateUrl, aspectRatio, numberOfImages, inputImages } = body
 
     // Validate required parameters
     if (!jobId || !prompt) {
@@ -55,12 +55,8 @@ export async function POST(request: NextRequest) {
                             prompt: prompt,
                             aspect_ratio: aspectRatio || '1:1',
                             number_of_images: 1,
-                            quality: quality || 'auto',
-                            output_format: outputFormat || 'webp',
-                            background: background || 'auto',
-                            moderation: moderation || 'auto',
-                            input_fidelity: inputFidelity || 'low',
-                            output_compression: outputCompression || 90,
+                            quality: 'auto', // hardcode เพื่อป้องกัน upscale error
+                            output_format: 'webp', // ไฟล์เล็ก คุณภาพดี
                             input_images: [inputImages[i]], // ส่งทีละรูป
                         }
 
@@ -98,28 +94,32 @@ export async function POST(request: NextRequest) {
                 }
             }
         } else {
-            // ไม่มี input images -> สร้างตาม numberOfImages ปกติ
-            const gptInput: Record<string, unknown> = {
-                prompt: prompt,
-                aspect_ratio: aspectRatio || '1:1',
-                number_of_images: numberOfImages || 1,
-                quality: quality || 'auto',
-                output_format: outputFormat || 'webp',
-                background: background || 'auto',
-                moderation: moderation || 'auto',
-                input_fidelity: inputFidelity || 'low',
-                output_compression: outputCompression || 90,
+            // ไม่มี input images -> เจนทีละรูปเหมือนกัน (เพื่อให้ได้รูปแยก)
+            const imagesToGenerate = numberOfImages || 1
+            console.log(`🔄 Creating ${imagesToGenerate} predictions without input images...`)
+            
+            for (let i = 0; i < imagesToGenerate; i++) {
+                try {
+                    const gptInput: Record<string, unknown> = {
+                        prompt: prompt,
+                        aspect_ratio: aspectRatio || '1:1',
+                        number_of_images: 1, // เจนทีละรูป
+                    }
+
+                    const gptPrediction = await replicate.predictions.create({
+                        model: 'openai/gpt-image-1.5',
+                        input: gptInput,
+                        webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+                        webhook_events_filter: ['completed'],
+                    })
+
+                    gptPredictionIds.push(gptPrediction.id)
+                    console.log(`  ✅ Prediction ${i + 1}/${imagesToGenerate} created:`, gptPrediction.id)
+                } catch (predError) {
+                    console.error(`  ❌ Failed to create prediction ${i + 1}:`, predError)
+                    throw new Error(`Failed to create prediction for image ${i + 1}`)
+                }
             }
-
-            const gptPrediction = await replicate.predictions.create({
-                model: 'openai/gpt-image-1.5',
-                input: gptInput,
-                webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
-                webhook_events_filter: ['completed'],
-            })
-
-            gptPredictionIds.push(gptPrediction.id)
-            console.log('✅ Single prediction created:', gptPrediction.id)
         }
 
         console.log('✅ All GPT Image predictions created:', gptPredictionIds.length)
