@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Replicate from 'replicate'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@supabase/supabase-js'
 
 const replicate = new Replicate({
     auth: process.env.REPLICATE_API_TOKEN!,
 })
+
+// ใช้ service role เพื่อ bypass RLS
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
 
 export async function POST(request: NextRequest) {
     const body = await request.json()
@@ -28,8 +34,6 @@ export async function POST(request: NextRequest) {
     try {
 
         console.log('🚀 Starting GPT → Template Pipeline:', { jobId, numberOfImages, inputImageCount: inputImages?.length || 0, templateUrl })
-        
-        const supabase = await createClient()
 
         // ======= STEP 1: GPT Image 1.5 (แยกรูปทีละรูปแต่ไม่ wait) =======
         console.log('📸 Step 1: Creating GPT Image 1.5 predictions...')
@@ -125,8 +129,8 @@ export async function POST(request: NextRequest) {
             throw new Error('No predictions were created')
         }
 
-        // บันทึก job metadata สำหรับ webhook
-        await supabase
+        // บันทึก job metadata สำหรับ webhook (ใช้ service role เพื่อ bypass RLS)
+        const { error: updateError } = await supabaseAdmin
             .from('jobs')
             .update({
                 status: 'processing',
@@ -143,6 +147,13 @@ export async function POST(request: NextRequest) {
             })
             .eq('id', jobId)
 
+        if (updateError) {
+            console.error('❌ Failed to update job metadata:', updateError)
+            throw new Error('Failed to save job metadata')
+        }
+        
+        console.log('✅ Job metadata saved:', { jobId, gptPredictionIds })
+
         // Return ทันที (webhook จะจัดการต่อ)
         return NextResponse.json({
             success: true,
@@ -158,8 +169,7 @@ export async function POST(request: NextRequest) {
         // Update job status to failed
         if (jobId) {
             try {
-                const supabase = await createClient()
-                await supabase
+                await supabaseAdmin
                     .from('jobs')
                     .update({
                         status: 'failed',
