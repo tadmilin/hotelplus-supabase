@@ -385,21 +385,29 @@ export default function GptImagePage() {
     if (files && files.length > 0) {
       setUploading(true)
       
+      // 🔥 Vercel Hobby Plan Limit: 4.5MB body size
+      const VERCEL_LIMIT_MB = 4
       const compressedFiles: File[] = []
       
       for (const file of Array.from(files)) {
         const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
         
-        // Compress if file is larger than 3MB to ensure it stays under Vercel's 4.5MB limit
-        if (file.size > 3 * 1024 * 1024) {
+        // 🔥 ตรวจสอบว่าเป็น HEIC/HEIF หรือไม่
+        const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                       file.name.toLowerCase().endsWith('.heic') || 
+                       file.name.toLowerCase().endsWith('.heif')
+        
+        // 🔥 บีบอัดทุกไฟล์ที่ใหญ่กว่า Vercel limit หรือเป็น HEIC
+        if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
           console.log(`🔄 Compressing: ${file.name} (${fileSizeMB}MB)`)
           
           try {
             const options = {
-              maxSizeMB: 3,
-              maxWidthOrHeight: 2048,
+              maxSizeMB: VERCEL_LIMIT_MB,
+              maxWidthOrHeight: 3840, // 4K resolution - รักษาคุณภาพหน้าคน
               useWebWorker: true,
               fileType: 'image/jpeg' as const,
+              initialQuality: 0.9,
             }
             
             const compressed = await imageCompression(file, options)
@@ -409,7 +417,36 @@ export default function GptImagePage() {
             compressedFiles.push(compressed)
           } catch (err) {
             console.error(`Failed to compress ${file.name}:`, err)
-            compressedFiles.push(file) // Use original if compression fails
+            // 🔥 ลองบีบอัดอีกครั้งด้วย quality ต่ำลง
+            try {
+              const fallbackOptions = {
+                maxSizeMB: VERCEL_LIMIT_MB,
+                maxWidthOrHeight: 2560,
+                useWebWorker: true,
+                fileType: 'image/jpeg' as const,
+                initialQuality: 0.7,
+              }
+              const compressed = await imageCompression(file, fallbackOptions)
+              compressedFiles.push(compressed)
+            } catch {
+              compressedFiles.push(file) // Use original if compression fails
+            }
+          }
+        } else if (isHEIC) {
+          // 🔥 HEIC เล็ก → แปลงเป็น JPEG ที่ frontend
+          console.log(`📱 Converting HEIC: ${file.name}`)
+          try {
+            const options = {
+              maxSizeMB: VERCEL_LIMIT_MB,
+              maxWidthOrHeight: 3840,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+            }
+            const converted = await imageCompression(file, options)
+            compressedFiles.push(converted)
+          } catch (err) {
+            console.error(`Failed to convert HEIC:`, err)
+            compressedFiles.push(file) // ส่งไป server ให้ handle
           }
         } else {
           console.log(`✓ ${file.name} (${fileSizeMB}MB) - no compression needed`)
@@ -548,54 +585,63 @@ export default function GptImagePage() {
         
         // Check if template is from Google Drive (selected URL) or uploaded file
         if (selectedTemplateUrl) {
-          // Template from Google Drive - convert to Cloudinary
-          console.log('📤 Converting Drive template to Cloudinary...')
+          // 🔥 เช็คว่า template เป็น Cloudinary URL หรือ Drive URL
+          const isCloudinaryUrl = selectedTemplateUrl.includes('cloudinary.com') || selectedTemplateUrl.includes('res.cloudinary')
           
-          try {
-            const templateImg = templateImages.find(img => img.url === selectedTemplateUrl)
+          if (isCloudinaryUrl) {
+            // Template จาก Cloudinary (upload มาแล้ว) - ใช้ URL ตรงๆ
+            console.log('✅ Template is already on Cloudinary:', selectedTemplateUrl)
+            finalTemplateUrl = selectedTemplateUrl
+          } else {
+            // Template from Google Drive - convert to Cloudinary
+            console.log('📤 Converting Drive template to Cloudinary...')
+          
+            try {
+              const templateImg = templateImages.find(img => img.url === selectedTemplateUrl)
             
-            if (!templateImg) {
-              throw new Error('ไม่พบไฟล์ Template ที่เลือก กรุณาเลือกใหม่')
-            }
+              if (!templateImg) {
+                throw new Error('ไม่พบไฟล์ Template ที่เลือก กรุณาเลือกใหม่')
+              }
             
-            if (!templateImg.id || !templateImg.name) {
-              throw new Error('ข้อมูล Template ไม่สมบูรณ์ (ไม่มี ID หรือชื่อไฟล์)')
-            }
+              if (!templateImg.id || !templateImg.name) {
+                throw new Error('ข้อมูล Template ไม่สมบูรณ์ (ไม่มี ID หรือชื่อไฟล์)')
+              }
             
-            console.log(`📤 Processing template: ${templateImg.name} (ID: ${templateImg.id})`)
+              console.log(`📤 Processing template: ${templateImg.name} (ID: ${templateImg.id})`)
             
-            const response = await fetch('/api/drive/download-and-upload', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                fileId: templateImg.id,
-                fileName: templateImg.name,
-              }),
-            })
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}))
-              const errorMsg = errorData.error || 'Unknown error'
-              throw new Error(`ไม่สามารถแปลง Template ได้: ${errorMsg}`)
-            }
-
-            const data = await response.json()
-            
-            if (!data.url) {
-              throw new Error('API ไม่ส่ง URL กลับมา')
-            }
-            
-            finalTemplateUrl = data.url
-            console.log('✅ Drive template converted:', finalTemplateUrl)
-          } catch (templateError) {
-            await supabase
-              .from('jobs')
-              .update({ 
-                status: 'failed',
-                error: templateError instanceof Error ? templateError.message : 'Template conversion failed'
+              const response = await fetch('/api/drive/download-and-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fileId: templateImg.id,
+                  fileName: templateImg.name,
+                }),
               })
-              .eq('id', job.id)
-            throw templateError
+
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}))
+                const errorMsg = errorData.error || 'Unknown error'
+                throw new Error(`ไม่สามารถแปลง Template ได้: ${errorMsg}`)
+              }
+
+              const data = await response.json()
+            
+              if (!data.url) {
+                throw new Error('API ไม่ส่ง URL กลับมา')
+              }
+            
+              finalTemplateUrl = data.url
+              console.log('✅ Drive template converted:', finalTemplateUrl)
+            } catch (templateError) {
+              await supabase
+                .from('jobs')
+                .update({ 
+                  status: 'failed',
+                  error: templateError instanceof Error ? templateError.message : 'Template conversion failed'
+                })
+                .eq('id', job.id)
+              throw templateError
+            }
           }
         } else if (templateFile) {
           // Template from file upload
@@ -889,22 +935,55 @@ export default function GptImagePage() {
                     <input
                       type="file"
                       id="gpt-template-upload"
-                      accept="image/*"
+                      accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
                       onChange={async (e) => {
                         const file = e.target.files?.[0]
                         if (!file) return
 
                         setUploading(true)
+                        const VERCEL_LIMIT_MB = 4
+                        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+                        
                         try {
-                          let fileToUpload = file
-                          if (file.size > 3 * 1024 * 1024) {
-                            console.log(`Compressing template: ${(file.size / (1024 * 1024)).toFixed(2)}MB`)
-                            fileToUpload = await imageCompression(file, {
-                              maxSizeMB: 3,
-                              maxWidthOrHeight: 2048,
-                              useWebWorker: true,
-                            })
-                            console.log(`✓ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
+                          let fileToUpload: File | Blob = file
+                          
+                          // 🔥 ตรวจสอบว่าเป็น HEIC/HEIF หรือไม่
+                          const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                                         file.name.toLowerCase().endsWith('.heic') || 
+                                         file.name.toLowerCase().endsWith('.heif')
+                          
+                          if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
+                            console.log(`🗜️ Compressing template: ${fileSizeMB}MB → <4MB`)
+                            
+                            try {
+                              fileToUpload = await imageCompression(file, {
+                                maxSizeMB: VERCEL_LIMIT_MB,
+                                maxWidthOrHeight: 3840, // 4K resolution
+                                useWebWorker: true,
+                                fileType: 'image/jpeg',
+                                initialQuality: 0.9,
+                              })
+                              console.log(`✅ Compressed to: ${(fileToUpload.size / (1024 * 1024)).toFixed(2)}MB`)
+                            } catch (err) {
+                              console.error('Failed to compress template:', err)
+                              setError('❌ ไม่สามารถบีบอัด Template ได้')
+                              setUploading(false)
+                              e.target.value = ''
+                              return
+                            }
+                          } else if (isHEIC) {
+                            // 🔥 HEIC เล็ก → แปลงเป็น JPEG
+                            console.log(`📱 Converting HEIC template: ${file.name}`)
+                            try {
+                              fileToUpload = await imageCompression(file, {
+                                maxSizeMB: VERCEL_LIMIT_MB,
+                                maxWidthOrHeight: 3840,
+                                useWebWorker: true,
+                                fileType: 'image/jpeg',
+                              })
+                            } catch (err) {
+                              console.error('Failed to convert HEIC:', err)
+                            }
                           }
 
                           const formData = new FormData()

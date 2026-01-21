@@ -635,7 +635,15 @@ export default function CustomPromptPage() {
           const templateImage = templateImages.find(img => img.url === selectedTemplate)
           
           if (templateImage) {
-            if (selectedTemplate.includes('drive.google.com')) {
+            // 🔥 เช็คว่า template เป็น Cloudinary URL หรือ Drive URL
+            const isCloudinaryUrl = selectedTemplate.includes('cloudinary.com') || selectedTemplate.includes('res.cloudinary')
+            
+            if (isCloudinaryUrl) {
+              // Template จาก Cloudinary (upload มาแล้ว) - ใช้ URL ตรงๆ
+              console.log('✅ Template is already on Cloudinary:', selectedTemplate)
+              finalTemplateUrl = selectedTemplate
+            } else {
+              // Template from Google Drive - convert to Cloudinary
               const uploadRes = await fetch('/api/drive/download-and-upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -648,8 +656,6 @@ export default function CustomPromptPage() {
               } else {
                 throw new Error('Template upload failed')
               }
-            } else {
-              finalTemplateUrl = selectedTemplate
             }
           }
         } catch (templateError) {
