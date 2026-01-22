@@ -752,63 +752,186 @@ export default function GptImagePage() {
         setUploading(false)
       }
 
-      // Call appropriate API based on mode
-      const apiEndpoint = useTemplate ? '/api/replicate/gpt-with-template' : '/api/replicate/gpt-image'
-      
-      const apiBody: Record<string, unknown> = {
-        jobId: job.id,
-        prompt: prompt,
-        background: background,
-        moderation: moderation,
-        inputFidelity: inputFidelity,
-        outputCompression: outputCompression,
-        aspectRatio: aspectRatio,
-        numberOfImages: numImages,
-        quality: quality,
-        outputFormat: outputFormat,
-        inputImages: imageUrls,
-      }
-
-      // Add template URL for template mode
+      // 🔥 แยกโหมด: template กับไม่มี template
       if (useTemplate && jobData.template_url) {
-        apiBody.templateUrl = jobData.template_url
-      }
-
-      // Call Replicate API
-      try {
-        const response = await fetch(apiEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(apiBody),
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || 'Failed to create images')
+        // ✅ TEMPLATE MODE: ส่งรูปทั้งหมดใน 1 job (แบบเดิม)
+        const apiBody: Record<string, unknown> = {
+          jobId: job.id,
+          prompt: prompt,
+          background: background,
+          moderation: moderation,
+          inputFidelity: inputFidelity,
+          outputCompression: outputCompression,
+          aspectRatio: aspectRatio,
+          numberOfImages: numImages,
+          quality: quality,
+          outputFormat: outputFormat,
+          inputImages: imageUrls,
+          templateUrl: jobData.template_url,
         }
 
-        const result = await response.json()
+        try {
+          const response = await fetch('/api/replicate/gpt-with-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(apiBody),
+          })
 
-        // Update job with replicate_id (for non-pipeline mode)
-        if (!useTemplate && result.id) {
+          if (!response.ok) {
+            const errorData = await response.json()
+            throw new Error(errorData.error || 'Failed to create images')
+          }
+
+          console.log('✅ Template mode: 1 job created')
+          router.push('/dashboard')
+        } catch (apiError) {
           await supabase
             .from('jobs')
-            .update({ replicate_id: result.id })
+            .update({ 
+              status: 'failed',
+              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+            })
             .eq('id', job.id)
+          throw apiError
+        }
+      } else if (imageUrls.length > 0) {
+        // ✅ NO TEMPLATE + มีรูป: แยกรูปละ 1 job (แบบ custom-prompt)
+        // ต้องลบ job แรกที่สร้างไว้ เพราะจะสร้าง N jobs แทน
+        await supabase.from('jobs').delete().eq('id', job.id)
+        
+        const results = { success: 0, failed: 0, errors: [] as string[] }
+        
+        for (let i = 0; i < imageUrls.length; i++) {
+          try {
+            // สร้าง job แยกสำหรับรูปแต่ละรูป
+            const { data: separateJob, error: separateJobError } = await supabase
+              .from('jobs')
+              .insert({
+                user_id: user.id,
+                user_name: user.user_metadata?.name || null,
+                user_email: user.email,
+                job_type: 'gpt-image',
+                status: 'processing',
+                prompt: prompt,
+                aspect_ratio: aspectRatio,
+                quality: quality,
+                output_format: outputFormat,
+                background: background,
+                moderation: moderation,
+                input_fidelity: inputFidelity,
+                output_compression: outputCompression,
+                number_of_images: numImages,
+                image_urls: [imageUrls[i]], // ส่งแค่รูปเดียว
+                output_urls: [],
+              })
+              .select()
+              .single()
+
+            if (separateJobError) {
+              console.error(`❌ Job ${i + 1}/${imageUrls.length} creation failed:`, separateJobError)
+              results.failed++
+              results.errors.push(`Job ${i + 1}: ${separateJobError.message}`)
+              continue
+            }
+
+            // Call Replicate API
+            const response = await fetch('/api/replicate/gpt-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jobId: separateJob.id,
+                prompt: prompt,
+                aspectRatio: aspectRatio,
+                numberOfImages: numImages,
+                quality: quality,
+                outputFormat: outputFormat,
+                background: background,
+                moderation: moderation,
+                inputFidelity: inputFidelity,
+                outputCompression: outputCompression,
+                inputImages: [imageUrls[i]], // ส่งแค่รูปเดียว
+              }),
+            })
+
+            if (!response.ok) {
+              const errorData = await response.json()
+              console.error(`❌ Job ${i + 1}/${imageUrls.length} API failed:`, errorData.error)
+              results.failed++
+              results.errors.push(`Job ${i + 1}: ${errorData.error}`)
+              continue
+            }
+
+            results.success++
+            console.log(`✅ Job ${i + 1}/${imageUrls.length} created successfully`)
+          } catch (jobErr: unknown) {
+            console.error(`❌ Job ${i + 1}/${imageUrls.length} error:`, jobErr)
+            results.failed++
+            const errMsg = jobErr instanceof Error ? jobErr.message : 'Unknown error'
+            results.errors.push(`Job ${i + 1}: ${errMsg}`)
+          }
         }
 
-        // Redirect to dashboard
-        router.push('/dashboard')
-      } catch (apiError) {
-        // Mark job as failed if Replicate API fails
-        await supabase
-          .from('jobs')
-          .update({ 
-            status: 'failed',
-            error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+        // แสดงผลสรุป
+        if (results.success > 0 && results.failed === 0) {
+          // สำเร็จทั้งหมด
+          console.log(`✅ Created ${results.success} separate jobs`)
+          router.push('/dashboard')
+        } else if (results.success > 0 && results.failed > 0) {
+          // สำเร็จบางส่วน
+          setError(`สร้างสำเร็จ ${results.success}/${imageUrls.length} jobs | ล้มเหลว: ${results.failed} jobs`)
+          setTimeout(() => router.push('/dashboard'), 3000)
+        } else {
+          // ล้มเหลวทั้งหมด
+          throw new Error(`สร้างล้มเหลวทั้งหมด: ${results.errors[0] || 'Unknown error'}`)
+        }
+      } else {
+        // ✅ NO TEMPLATE + ไม่มีรูป: ส่ง prompt อย่างเดียว (1 job)
+        const apiBody: Record<string, unknown> = {
+          jobId: job.id,
+          prompt: prompt,
+          background: background,
+          moderation: moderation,
+          inputFidelity: inputFidelity,
+          outputCompression: outputCompression,
+          aspectRatio: aspectRatio,
+          numberOfImages: numImages,
+          quality: quality,
+          outputFormat: outputFormat,
+        }
+
+        try {
+          const response = await fetch('/api/replicate/gpt-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(apiBody),
           })
-          .eq('id', job.id)
-        throw apiError
+
+          if (!response.ok) {
+            const errorData = await response.json()
+            throw new Error(errorData.error || 'Failed to create images')
+          }
+
+          const result = await response.json()
+
+          if (result.id) {
+            await supabase
+              .from('jobs')
+              .update({ replicate_id: result.id })
+              .eq('id', job.id)
+          }
+
+          console.log('✅ Text-only mode: 1 job created')
+          router.push('/dashboard')
+        } catch (apiError) {
+          await supabase
+            .from('jobs')
+            .update({ 
+              status: 'failed',
+              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+            })
+            .eq('id', job.id)
+          throw apiError
+        }
       }
     } catch (err: unknown) {
       console.error('Error:', err)
