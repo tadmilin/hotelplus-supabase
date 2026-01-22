@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Replicate from 'replicate'
+import { createClient } from '@/lib/supabase/server'
 
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN!,
 })
 
 export async function POST(req: NextRequest) {
+  let jobId: string | null = null
+  
   try {
+    const body = await req.json()
+    jobId = body.jobId
     const { 
-      jobId, 
       prompt, 
       aspectRatio, 
       numberOfImages, 
@@ -19,7 +23,7 @@ export async function POST(req: NextRequest) {
       inputFidelity,
       outputCompression,
       inputImages 
-    } = await req.json()
+    } = body
 
     console.log('📥 GPT Image Request:', {
       jobId,
@@ -38,6 +42,14 @@ export async function POST(req: NextRequest) {
     if (!jobId || !prompt) {
       return NextResponse.json(
         { error: 'Missing required fields' },
+        { status: 400 }
+      )
+    }
+
+    // Validate input images count (recommended max for stability)
+    if (inputImages && inputImages.length > 10) {
+      return NextResponse.json(
+        { error: 'Max 10 input images for stability' },
         { status: 400 }
       )
     }
@@ -73,17 +85,58 @@ export async function POST(req: NextRequest) {
       inputKeys: Object.keys(input)
     })
 
-    const prediction = await replicate.predictions.create({
-      model: model,
-      input: input,
-      webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
-      webhook_events_filter: ['completed'],
-    })
+    // Retry logic for Replicate API (max 3 attempts)
+    let prediction
+    const maxRetries = 3
 
-    console.log('✅ GPT Image prediction created:', prediction.id)
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        prediction = await replicate.predictions.create({
+          model: model,
+          input: input,
+          webhook: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/replicate`,
+          webhook_events_filter: ['completed'],
+        })
+        console.log(`✅ Prediction created on attempt ${attempt}:`, prediction.id)
+        break // Success
+      } catch (apiError: unknown) {
+        const error = apiError as { response?: { status?: number }; message?: string }
+        const isLastAttempt = attempt === maxRetries
+        
+        if (isLastAttempt) {
+          console.error(`❌ Failed after ${maxRetries} attempts:`, error.message)
+          throw apiError
+        }
+        
+        // Calculate backoff delay
+        const isRateLimit = error?.response?.status === 429
+        const backoffMs = isRateLimit ? 2000 * attempt : 1000 * attempt
+        
+        console.log(`⚠️ Attempt ${attempt} failed (${isRateLimit ? 'rate limit' : 'error'}), retrying in ${backoffMs}ms...`)
+        await new Promise(resolve => setTimeout(resolve, backoffMs))
+      }
+    }
 
-    // If number_of_images > 1, the output will be an array
-    // We'll handle it in the webhook
+    if (!prediction) {
+      throw new Error('Prediction is undefined after retries')
+    }
+
+    // Update job with prediction ID and status
+    const supabase = await createClient()
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({ 
+        replicate_id: prediction.id,
+        status: 'processing'
+      })
+      .eq('id', jobId)
+
+    if (updateError) {
+      console.error('❌ Failed to update job:', updateError)
+      throw new Error('Failed to update job with prediction ID')
+    }
+
+    console.log('✅ Job updated successfully')
 
     return NextResponse.json({
       success: true,
@@ -91,8 +144,25 @@ export async function POST(req: NextRequest) {
       status: prediction.status,
     })
   } catch (error: unknown) {
-    console.error('Replicate API error:', error)
+    console.error('❌ GPT Image API error:', error)
     const errorMessage = error instanceof Error ? error.message : 'Failed to create prediction'
+    
+    // Update job status to failed
+    if (jobId) {
+      try {
+        const supabase = await createClient()
+        await supabase
+          .from('jobs')
+          .update({ 
+            status: 'failed',
+            error: errorMessage 
+          })
+          .eq('id', jobId)
+      } catch (updateError) {
+        console.error('Failed to update job status:', updateError)
+      }
+    }
+    
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

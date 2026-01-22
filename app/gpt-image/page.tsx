@@ -1385,6 +1385,125 @@ export default function GptImagePage() {
               disabled={creating}
             />
           </div>
+
+          {/* Advanced Settings */}
+          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 border-2 border-purple-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">⚙️ การตั้งค่าขั้นสูง</h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Quality */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  ✨ คุณภาพ (Quality)
+                </label>
+                <select
+                  value={quality}
+                  onChange={(e) => setQuality(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
+                  disabled={creating}
+                >
+                  <option value="auto">Auto (แนะนำ)</option>
+                  <option value="high">High</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+
+              {/* Output Format */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  📁 รูปแบบไฟล์ (Output Format)
+                </label>
+                <select
+                  value={outputFormat}
+                  onChange={(e) => setOutputFormat(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
+                  disabled={creating}
+                >
+                  <option value="webp">WebP (เล็กที่สุด)</option>
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPG</option>
+                </select>
+              </div>
+
+              {/* Background */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🖼️ พื้นหลัง (Background)
+                </label>
+                <select
+                  value={background}
+                  onChange={(e) => setBackground(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
+                  disabled={creating}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="preserve">Preserve (รักษาพื้นหลังเดิม)</option>
+                  <option value="remove">Remove (ลบพื้นหลัง)</option>
+                </select>
+              </div>
+
+              {/* Moderation */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🛡️ Moderation
+                </label>
+                <select
+                  value={moderation}
+                  onChange={(e) => setModeration(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
+                  disabled={creating}
+                >
+                  <option value="auto">Auto (แนะนำ)</option>
+                  <option value="strict">Strict</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+
+              {/* Input Fidelity */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🎯 Input Fidelity
+                </label>
+                <select
+                  value={inputFidelity}
+                  onChange={(e) => setInputFidelity(e.target.value)}
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
+                  disabled={creating}
+                >
+                  <option value="low">Low (Creative)</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High (ใกล้เคียงต้นฉบับ)</option>
+                </select>
+              </div>
+
+              {/* Output Compression */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🗜️ Compression: {outputCompression}%
+                </label>
+                <input
+                  type="range"
+                  min="60"
+                  max="100"
+                  value={outputCompression}
+                  onChange={(e) => setOutputCompression(parseInt(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  disabled={creating}
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>เล็กกว่า</span>
+                  <span>คุณภาพสูง</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-blue-50 border-l-4 border-blue-400 p-3">
+              <p className="text-xs text-blue-800">
+                💡 <strong>Input Fidelity:</strong> Low = AI สร้างสรรค์มากขึ้น | High = ใกล้เคียงรูปต้นฉบับ
+              </p>
+            </div>
+          </div>
+
           {/* Submit Button */}
           <div className="pt-4">
             <button

@@ -339,14 +339,12 @@ export async function POST(req: NextRequest) {
               .eq('id', job.id)
             
             // สร้าง Step 2: GPT Image 1.5 with Template
-            const templatePrompt = `Use the first image as a visual layout reference only.
-Create an original image with a very similar composition, spacing, and visual hierarchy.
+            const templatePrompt = `ใช้ภาพแรกเป็นภาพอ้างอิงเฉพาะโครงสร้างและเลย์เอาต์ของดีไซน์เท่านั้น
+คงรูปแบบการจัดวางไว้เหมือนเดิม แต่ลบข้อความ ตัวอักษร และโลโก้ทั้งหมดออก
 
-Place the second image as the main hero/background.
-Use any additional images as smaller supporting elements in similar relative positions.
-
-Do not include any text, numbers, or logos.
-Match the overall color mood and visual balance.`
+นำภาพที่เหลือมาแทนที่รูปเดิมในภาพอ้างอิงตามลำดับอย่างครบถ้วน
+ไม่ให้มีภาพหรือองค์ประกอบใดจากภาพแรกหลงเหลืออยู่ในผลลัพธ์
+`
 
             const gptTemplateInput = {
               prompt: templatePrompt,
@@ -399,16 +397,39 @@ Match the overall color mood and visual balance.`
       // อัพโหลดรูปไป Cloudinary เพื่อเก็บถาวร (Replicate URLs หมดอายุ!)
       const permanentUrls: string[] = []
       for (const tempUrl of outputUrls) {
-        try {
-          console.log('📤 Uploading to Cloudinary:', tempUrl.substring(0, 50) + '...')
-          // ใช้ full-size สำหรับทุก output จาก Replicate
-          const permanentUrl = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
-          permanentUrls.push(permanentUrl)
-          console.log('✅ Uploaded successfully')
-        } catch (uploadError) {
-          console.error('❌ Cloudinary upload failed, using temp URL:', uploadError)
-          // Fallback: ใช้ URL เดิมถ้า upload ไม่สำเร็จ
-          permanentUrls.push(tempUrl)
+        let uploadedUrl = ''
+        
+        // Retry Cloudinary upload with exponential backoff
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            console.log(`📤 Uploading to Cloudinary (attempt ${attempt}/2):`, tempUrl.substring(0, 50) + '...')
+            uploadedUrl = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+            permanentUrls.push(uploadedUrl)
+            console.log('✅ Upload successful')
+            break
+          } catch (uploadError) {
+            const isLastAttempt = attempt === 2
+            
+            if (isLastAttempt) {
+              console.error('❌ Cloudinary upload failed after all retries:', uploadError)
+              const errorMsg = uploadError instanceof Error ? uploadError.message : 'Unknown error'
+              // Mark job as failed - ห้ามใช้ temp URL
+              await supabaseAdmin
+                .from('jobs')
+                .update({
+                  status: 'failed',
+                  error: `Failed to upload output to permanent storage: ${errorMsg}`,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', job.id)
+              return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
+            }
+            
+            // Wait before retry (exponential backoff)
+            const backoffMs = 2000 * attempt
+            console.log(`🔄 Retrying in ${backoffMs}ms...`)
+            await new Promise(resolve => setTimeout(resolve, backoffMs))
+          }
         }
       }
 
@@ -440,10 +461,8 @@ Match the overall color mood and visual balance.`
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)
         
         try {
-          // For gpt-with-template: only upscale the last image (final Nano Banana Pro output)
-          const urlsToUpscale = job.job_type === 'gpt-with-template' 
-            ? [outputUrls[outputUrls.length - 1]] 
-            : outputUrls
+          // Upscale all output images
+          const urlsToUpscale = outputUrls
 
           // Create upscale jobs for each output
           for (const outputUrl of urlsToUpscale) {
