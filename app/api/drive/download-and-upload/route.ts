@@ -57,14 +57,12 @@ export async function POST(req: NextRequest) {
   // Sanitize filename
   const sanitizedName = (fileName || 'untitled.jpg').replace(/[^\w\s.-]/gi, '_').replace(/\s+/g, '_')
   
-  let attempt = 0
-  const maxAttempts = 2
+  const maxRetries = 2
+  let lastError: Error | null = null
   
-  while (attempt < maxAttempts) {
-    attempt++
-    
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`📂 [Attempt ${attempt}/${maxAttempts}] Processing: ${sanitizedName}`)
+      console.log(`📂 [Attempt ${attempt}/${maxRetries}] Processing: ${sanitizedName}`)
 
       const drive = getDriveClient()
 
@@ -84,13 +82,16 @@ export async function POST(req: NextRequest) {
           }
         ) as GaxiosResponse<ArrayBuffer>
       } catch (downloadError) {
-        console.error(`❌ Download failed (attempt ${attempt}):`, downloadError)
-        if (attempt < maxAttempts) {
-          console.log(`🔄 Retrying in 2 seconds...`)
-          await new Promise(resolve => setTimeout(resolve, 2000))
-          continue
-        }
-        throw downloadError
+        const error = downloadError as Error
+        console.error(`❌ Download failed (attempt ${attempt}):`, error.message)
+        lastError = new Error(`Download failed: ${error.message}`)
+        
+        const isLastAttempt = attempt === maxRetries
+        if (isLastAttempt) throw lastError
+        
+        console.log(`🔄 Retrying in 2 seconds...`)
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        continue
       }
 
       let buffer: Buffer = Buffer.from(response.data as ArrayBuffer)
@@ -131,7 +132,10 @@ export async function POST(req: NextRequest) {
         console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${finalSizeMB}MB`)
         
       } catch (sharpError) {
-        console.error(`⚠️ Sharp processing failed:`, sharpError)
+        const error = sharpError as Error
+        console.error(`⚠️ Sharp processing failed:`, error.message)
+        lastError = new Error(`Compression failed: ${error.message}`)
+        
         // ถ้า Sharp ล้ม → แปลงเป็น JPEG อย่างเดียว
         try {
           buffer = await sharp(buffer, { failOnError: false })
@@ -154,22 +158,27 @@ export async function POST(req: NextRequest) {
         console.log(`✅ Success: ${url}`)
         return NextResponse.json({ url })
       } catch (uploadError) {
-        console.error(`❌ Cloudinary upload failed:`, uploadError)
-        if (attempt < maxAttempts) {
-          console.log(`🔄 Retrying upload...`)
-          await new Promise(resolve => setTimeout(resolve, 2000))
-          continue
-        }
-        throw uploadError
+        const error = uploadError as Error
+        console.error(`❌ Cloudinary upload failed:`, error.message)
+        lastError = new Error(`Upload failed: ${error.message}`)
+        
+        const isLastAttempt = attempt === maxRetries
+        if (isLastAttempt) throw lastError
+        
+        console.log(`🔄 Retrying upload...`)
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        continue
       }
       
     } catch (error) {
-      console.error(`❌ Error (attempt ${attempt}/${maxAttempts}):`, error)
+      const err = error as Error
+      console.error(`❌ Error (attempt ${attempt}/${maxRetries}):`, err.message)
+      lastError = err
       
-      if (attempt >= maxAttempts) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      const isLastAttempt = attempt === maxRetries
+      if (isLastAttempt) {
         return NextResponse.json(
-          { error: `Failed after ${maxAttempts} attempts: ${errorMessage}` },
+          { error: `Failed after ${maxRetries} attempts: ${err.message}` },
           { status: 500 }
         )
       }
@@ -179,5 +188,10 @@ export async function POST(req: NextRequest) {
     }
   }
   
-  return NextResponse.json({ error: 'Failed to process file' }, { status: 500 })
+  // Should not reach here, but just in case
+  const errorMsg = lastError?.message || 'Unknown error'
+  return NextResponse.json(
+    { error: `Failed to process file: ${errorMsg}` },
+    { status: 500 }
+  )
 }

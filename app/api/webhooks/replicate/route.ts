@@ -4,6 +4,10 @@ import replicate from '@/lib/replicate'
 import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
 import crypto from 'crypto'
 
+// Vercel Pro plan: max 300 seconds (5 minutes)
+// Webhook needs time for: download (30s) + compress (2s) + upload (28s) = ~60s
+export const maxDuration = 300
+
 // Create Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -100,6 +104,36 @@ export async function POST(req: NextRequest) {
       
       if (!signature || !webhookId || !webhookTimestamp) {
         console.error('❌ Missing webhook headers')
+        
+        // Try to parse body to get prediction ID and mark job as failed
+        try {
+          const bodyText = await req.text()
+          const bodyData = JSON.parse(bodyText) as { id?: string }
+          
+          if (bodyData.id) {
+            const { data: jobs } = await supabaseAdmin
+              .from('jobs')
+              .select('id')
+              .eq('replicate_id', bodyData.id)
+              .limit(1)
+            
+            if (jobs && jobs.length > 0) {
+              await supabaseAdmin
+                .from('jobs')
+                .update({
+                  status: 'failed',
+                  error: 'Webhook verification failed - missing signature headers',
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', jobs[0].id)
+              
+              console.log('✅ Marked job as failed due to missing webhook headers')
+            }
+          }
+        } catch (parseError) {
+          console.error('Failed to parse webhook body for fallback:', parseError)
+        }
+        
         return NextResponse.json({ error: 'Missing webhook headers' }, { status: 401 })
       }
       
@@ -317,6 +351,52 @@ export async function POST(req: NextRequest) {
             if (lockError || !lockResult) {
               // webhook อื่นเริ่ม Step 2 ไปแล้ว
               console.log('⚠️ Step 2 already started by another webhook, skipping')
+              
+              // Double-check: ถ้าครบทุก predictions แล้วแต่ job ยังค้าง processing_template
+              // อาจเป็น edge case ที่ Step 2 failed ก่อนหน้า
+              const { data: currentJob } = await supabaseAdmin
+                .from('jobs')
+                .select('status, replicate_id')
+                .eq('id', job.id)
+                .single()
+              
+              if (currentJob?.status === 'processing_template') {
+                console.log('🔍 Job stuck in processing_template, checking Step 2 status...')
+                
+                // Check if Step 2 prediction exists and its status
+                if (currentJob.replicate_id) {
+                  try {
+                    const step2Prediction = await replicate.predictions.get(currentJob.replicate_id)
+                    
+                    if (step2Prediction.status === 'failed' || step2Prediction.status === 'canceled') {
+                      console.log('⚠️ Step 2 failed, falling back to GPT results only')
+                      
+                      // Retrieve all GPT URLs and mark as completed
+                      const { data: allPredictions } = await supabaseAdmin
+                        .from('job_predictions')
+                        .select('urls')
+                        .eq('job_id', job.id)
+                      
+                      const allGptUrls = allPredictions?.flatMap(p => p.urls) || []
+                      
+                      await supabaseAdmin
+                        .from('jobs')
+                        .update({
+                          status: 'completed',
+                          output_urls: allGptUrls,
+                          error: 'Template step failed, using GPT results',
+                          completed_at: new Date().toISOString(),
+                        })
+                        .eq('id', job.id)
+                      
+                      console.log('✅ Job recovered with GPT results')
+                    }
+                  } catch (checkError) {
+                    console.error('Failed to check Step 2 status:', checkError)
+                  }
+                }
+              }
+              
               return NextResponse.json({ received: true, skipped: true })
             }
             

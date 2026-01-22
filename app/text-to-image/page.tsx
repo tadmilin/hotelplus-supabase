@@ -43,53 +43,76 @@ export default function TextToImagePage() {
     setError('')
 
     try {
-      // Create separate job for each image
+      // Create separate job for each image - collect all results
+      const results = { success: 0, failed: 0, errors: [] as string[] }
+      
       for (let i = 0; i < numImages; i++) {
-        const { data: job, error: jobError } = await supabase
-          .from('jobs')
-          .insert({
-            user_id: user.id,
-            user_name: user.user_metadata?.name || null,
-            user_email: user.email,
-            job_type: 'text-to-image',
-            status: 'processing',
-            prompt: prompt,
-            output_size: outputSize,
-            image_urls: [],
-            output_urls: [],
+        try {
+          const { data: job, error: jobError } = await supabase
+            .from('jobs')
+            .insert({
+              user_id: user.id,
+              user_name: user.user_metadata?.name || null,
+              user_email: user.email,
+              job_type: 'text-to-image',
+              status: 'processing',
+              prompt: prompt,
+              output_size: outputSize,
+              image_urls: [],
+              output_urls: [],
+            })
+            .select()
+            .single()
+
+          if (jobError) {
+            console.error(`❌ Job ${i + 1}/${numImages} creation failed:`, jobError)
+            results.failed++
+            results.errors.push(`Job ${i + 1}: ${jobError.message}`)
+            continue
+          }
+
+          // Call Replicate API for this job
+          const response = await fetch('/api/replicate/text-to-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: job.id,
+              prompt: prompt,
+              outputSize: outputSize,
+            }),
           })
-          .select()
-          .single()
 
-        if (jobError) throw jobError
+          if (!response.ok) {
+            const errorData = await response.json()
+            console.error(`❌ Job ${i + 1}/${numImages} API failed:`, errorData.error)
+            results.failed++
+            results.errors.push(`Job ${i + 1}: ${errorData.error}`)
+            continue
+          }
 
-        // Call Replicate API for this job
-        const response = await fetch('/api/replicate/text-to-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jobId: job.id,
-            prompt: prompt,
-            outputSize: outputSize,
-          }),
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || 'Failed to create images')
+          results.success++
+          console.log(`✅ Job ${i + 1}/${numImages} created successfully`)
+        } catch (jobErr: unknown) {
+          console.error(`❌ Job ${i + 1}/${numImages} error:`, jobErr)
+          results.failed++
+          const errMsg = jobErr instanceof Error ? jobErr.message : 'Unknown error'
+          results.errors.push(`Job ${i + 1}: ${errMsg}`)
         }
-
-        const result = await response.json()
-
-        // Update job with replicate_id
-        await supabase
-          .from('jobs')
-          .update({ replicate_id: result.id })
-          .eq('id', job.id)
       }
 
-      // Redirect to dashboard
-      router.push('/dashboard')
+      // Show results summary
+      if (results.success > 0 && results.failed === 0) {
+        // All success
+        router.push('/dashboard')
+      } else if (results.success > 0 && results.failed > 0) {
+        // Partial success
+        setError(`สร้างสำเร็จ ${results.success}/${numImages} รูป | ล้มเหลว: ${results.failed} รูป`)
+        // Still redirect to dashboard after 3 seconds
+        setTimeout(() => router.push('/dashboard'), 3000)
+      } else {
+        // All failed
+        setError(`สร้างล้มเหลวทั้งหมด: ${results.errors[0] || 'Unknown error'}`)
+      }
     } catch (err: unknown) {
       console.error('Error:', err)
       const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสร้างรูป'

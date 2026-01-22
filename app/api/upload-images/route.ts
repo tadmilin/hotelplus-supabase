@@ -72,75 +72,122 @@ export async function POST(req: NextRequest) {
     }
 
     const uploadedImages = []
+    const failedFiles: { name: string; error: string }[] = []
 
     for (const file of files) {
-      const sanitizedName = sanitizeFilename(file.name)
-      const bytes = await file.arrayBuffer()
-      let buffer = Buffer.from(bytes)
-      const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-      
-      console.log(`📤 Uploading: ${sanitizedName} (original: ${file.name}, ${originalSizeMB}MB, type: ${file.type})`)
-      
-      // 🔥 ตรวจสอบว่าเป็น HEIC/HEIF หรือไฟล์ใหญ่
-      const isHeic = file.type === 'image/heic' || 
-                     file.type === 'image/heif' ||
-                     file.name.toLowerCase().endsWith('.heic') ||
-                     file.name.toLowerCase().endsWith('.heif')
-      
-      const needsProcessing = buffer.length > 10 * 1024 * 1024 || isHeic
-      
-      let mimeType = 'image/jpeg'
-      
-      if (needsProcessing) {
-        console.log(`🔄 Processing large/HEIC image: ${sanitizedName}`)
+      try {
+        const sanitizedName = sanitizeFilename(file.name)
+        const bytes = await file.arrayBuffer()
+        let buffer = Buffer.from(bytes)
+        const originalSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
         
-        try {
-          // 🔥 ใช้ smart compression ที่รักษาคุณภาพหน้าคน
-          const result = await smartCompress(buffer)
-          buffer = Buffer.from(result.buffer)
-          mimeType = result.mimeType
+        console.log(`📤 Uploading: ${sanitizedName} (original: ${file.name}, ${originalSizeMB}MB, type: ${file.type})`)
+        
+        // 🔥 ตรวจสอบว่าเป็น HEIC/HEIF หรือไฟล์ใหญ่
+        const isHeic = file.type === 'image/heic' || 
+                       file.type === 'image/heif' ||
+                       file.name.toLowerCase().endsWith('.heic') ||
+                       file.name.toLowerCase().endsWith('.heif')
+        
+        const needsProcessing = buffer.length > 10 * 1024 * 1024 || isHeic
+        
+        let mimeType = 'image/jpeg'
+        
+        if (needsProcessing) {
+          console.log(`🔄 Processing large/HEIC image: ${sanitizedName}`)
           
-          const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
-          console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
-        } catch (err) {
-          console.error(`❌ Failed to process ${sanitizedName}:`, err)
-          throw new Error(`Failed to process image: ${sanitizedName}`)
+          try {
+            // 🔥 ใช้ smart compression ที่รักษาคุณภาพหน้าคน
+            const result = await smartCompress(buffer)
+            buffer = Buffer.from(result.buffer)
+            mimeType = result.mimeType
+            
+            const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
+            console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
+          } catch (err) {
+            console.error(`❌ Failed to process ${sanitizedName}:`, err)
+            throw new Error(`Failed to process image: ${sanitizedName}`)
+          }
+        } else {
+          // 🔥 ไฟล์เล็ก: แค่แปลงเป็น JPEG quality สูง
+          try {
+            const processed = await sharp(buffer, { failOnError: false })
+              .jpeg({ quality: 95, mozjpeg: true })
+              .toBuffer()
+            buffer = Buffer.from(processed)
+          } catch (err) {
+            console.log(`⚠️ Sharp failed, using original:`, err)
+          }
         }
-      } else {
-        // 🔥 ไฟล์เล็ก: แค่แปลงเป็น JPEG quality สูง
-        try {
-          const processed = await sharp(buffer, { failOnError: false })
-            .jpeg({ quality: 95, mozjpeg: true })
-            .toBuffer()
-          buffer = Buffer.from(processed)
-        } catch (err) {
-          console.log(`⚠️ Sharp failed, using original:`, err)
+        
+        const base64 = buffer.toString('base64')
+        const dataUri = `data:${mimeType};base64,${base64}`
+
+        // Retry Cloudinary upload (max 2 attempts)
+        let result
+        const maxRetries = 2
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            result = await cloudinary.uploader.upload(dataUri, {
+              folder: 'hotelplus-v2',
+              resource_type: 'image',
+              public_id: `${Date.now()}_${sanitizedName.replace(/\.[^/.]+$/, '')}`,
+              timeout: 60000, // 60 seconds
+            })
+            console.log(`✅ Uploaded successfully (attempt ${attempt}): ${sanitizedName}`)
+            break // Success
+          } catch (uploadError) {
+            const isLastAttempt = attempt === maxRetries
+            
+            if (isLastAttempt) {
+              console.error(`❌ Upload failed after ${maxRetries} attempts:`, uploadError)
+              throw uploadError
+            }
+            
+            const backoffMs = 2000 * attempt
+            console.log(`⚠️ Upload attempt ${attempt} failed, retrying in ${backoffMs}ms...`)
+            await new Promise(resolve => setTimeout(resolve, backoffMs))
+          }
         }
+
+        if (!result) {
+          throw new Error('Upload result is undefined')
+        }
+
+        uploadedImages.push({
+          id: result.public_id,
+          name: file.name,
+          url: result.secure_url,
+          thumbnailUrl: result.secure_url.replace('/upload/', '/upload/w_300,h_300,c_fill/'),
+        })
+      } catch (fileError) {
+        const errorMsg = fileError instanceof Error ? fileError.message : 'Unknown error'
+        console.error(`❌ Failed to upload ${file.name}:`, errorMsg)
+        failedFiles.push({ name: file.name, error: errorMsg })
       }
-      
-      const base64 = buffer.toString('base64')
-      const dataUri = `data:${mimeType};base64,${base64}`
-
-      const result = await cloudinary.uploader.upload(dataUri, {
-        folder: 'hotelplus-v2',
-        resource_type: 'image',
-        public_id: `${Date.now()}_${sanitizedName.replace(/\.[^/.]+$/, '')}`, // Use sanitized name without extension
-      })
-
-      uploadedImages.push({
-        id: result.public_id,
-        name: file.name, // Keep original name for display
-        url: result.secure_url,
-        thumbnailUrl: result.secure_url.replace('/upload/', '/upload/w_300,h_300,c_fill/'),
-      })
-      
-      console.log(`✅ Uploaded successfully: ${sanitizedName}`)
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      images: uploadedImages 
-    })
+    // Return results with partial success info
+    if (uploadedImages.length === 0) {
+      return NextResponse.json(
+        { error: 'All files failed to upload', failures: failedFiles },
+        { status: 500 }
+      )
+    }
+
+    const response: Record<string, unknown> = {
+      success: true,
+      images: uploadedImages,
+    }
+
+    if (failedFiles.length > 0) {
+      response.partial = true
+      response.failures = failedFiles
+      response.message = `Uploaded ${uploadedImages.length}/${files.length} files successfully`
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error('Upload error:', error)
     return NextResponse.json(
