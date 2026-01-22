@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       
 คำสั่ง: ${prompt}
 
-วางรูปที่เหลือในองค์ประกอบตามคำสั่งข้างต้น`
+วางรูปที่เหลือทั้งหมดในองค์ประกอบตามคำสั่งข้างต้นและลบข้อความตัวอักษรตัวเลขทั้งหมดออกจากภาพให้ด้วย`
       
       const input: Record<string, unknown> = {
         image_input: [templateUrl, ...imageUrls],

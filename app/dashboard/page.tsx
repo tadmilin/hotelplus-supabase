@@ -733,8 +733,8 @@ export default function DashboardPage() {
                 {selectedJob.image_urls && selectedJob.image_urls.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-purple-200">
                     <div className="text-xs font-semibold text-gray-700 mb-2">🖼️ รูปอ้างอิง ({selectedJob.image_urls.length} รูป):</div>
-                    <div className="flex gap-2 overflow-x-auto">
-                      {selectedJob.image_urls.slice(0, 5).map((url, index) => (
+                    <div className="flex gap-2 overflow-x-auto pb-2">
+                      {selectedJob.image_urls.map((url, index) => (
                         <div key={index} className="flex-shrink-0 w-16 h-16 relative rounded border border-purple-300">
                           <Image
                             src={url}
@@ -745,11 +745,6 @@ export default function DashboardPage() {
                           />
                         </div>
                       ))}
-                      {selectedJob.image_urls.length > 5 && (
-                        <div className="flex-shrink-0 w-16 h-16 bg-purple-100 rounded border border-purple-300 flex items-center justify-center text-xs text-purple-700 font-semibold">
-                          +{selectedJob.image_urls.length - 5}
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
