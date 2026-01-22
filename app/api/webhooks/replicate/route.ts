@@ -339,15 +339,14 @@ export async function POST(req: NextRequest) {
               .eq('id', job.id)
             
             // สร้าง Step 2: GPT Image 1.5 with Template
-            const templatePrompt = `[TEMPLATE MODE]
-Use the first image as the template. Preserve the exact layout and design frame 100%.
+            const templatePrompt = `Use the first image as a visual layout reference only.
+Create an original image with a very similar composition, spacing, and visual hierarchy.
 
-Steps:
-1. Use the first image after the template as the main image / background / hero image at the largest size.
-2. Use subsequent images as smaller supporting images placed in appropriate secondary positions.
-3. Place all new images on background layers only (do not overlap or cover the design frames).
-4. Remove all text, numbers, and logos.
-5. Preserve the original template's design, color tone, and artistic composition.`
+Place the second image as the main hero/background.
+Use any additional images as smaller supporting elements in similar relative positions.
+
+Do not include any text, numbers, or logos.
+Match the overall color mood and visual balance.`
 
             const gptTemplateInput = {
               prompt: templatePrompt,
