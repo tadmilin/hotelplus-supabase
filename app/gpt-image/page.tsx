@@ -802,9 +802,11 @@ export default function GptImagePage() {
         const results = { success: 0, failed: 0, errors: [] as string[] }
         
         for (let i = 0; i < imageUrls.length; i++) {
+          let separateJob: { id: string } | null = null
+          
           try {
             // สร้าง job แยกสำหรับรูปแต่ละรูป
-            const { data: separateJob, error: separateJobError } = await supabase
+            const { data: jobData, error: separateJobError } = await supabase
               .from('jobs')
               .insert({
                 user_id: user.id,
@@ -820,29 +822,31 @@ export default function GptImagePage() {
                 moderation: moderation,
                 input_fidelity: inputFidelity,
                 output_compression: outputCompression,
-                number_of_images: numImages,
+                number_of_images: 1, // 🔥 Hardcode = 1 (รูปละ 1 output)
                 image_urls: [imageUrls[i]], // ส่งแค่รูปเดียว
                 output_urls: [],
               })
               .select()
               .single()
 
-            if (separateJobError) {
+            if (separateJobError || !jobData) {
               console.error(`❌ Job ${i + 1}/${imageUrls.length} creation failed:`, separateJobError)
               results.failed++
-              results.errors.push(`Job ${i + 1}: ${separateJobError.message}`)
+              results.errors.push(`Job ${i + 1}: ${separateJobError?.message || 'Failed to create job'}`)
               continue
             }
+
+            separateJob = jobData
 
             // Call Replicate API
             const response = await fetch('/api/replicate/gpt-image', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                jobId: separateJob.id,
+                jobId: jobData.id,
                 prompt: prompt,
                 aspectRatio: aspectRatio,
-                numberOfImages: numImages,
+                numberOfImages: 1, // 🔥 Hardcode = 1 (รูปละ 1 output)
                 quality: quality,
                 outputFormat: outputFormat,
                 background: background,
@@ -856,6 +860,16 @@ export default function GptImagePage() {
             if (!response.ok) {
               const errorData = await response.json()
               console.error(`❌ Job ${i + 1}/${imageUrls.length} API failed:`, errorData.error)
+              
+              // Update job status to failed
+              await supabase
+                .from('jobs')
+                .update({ 
+                  status: 'failed',
+                  error: errorData.error || 'API call failed'
+                })
+                .eq('id', jobData.id)
+              
               results.failed++
               results.errors.push(`Job ${i + 1}: ${errorData.error}`)
               continue
@@ -865,8 +879,20 @@ export default function GptImagePage() {
             console.log(`✅ Job ${i + 1}/${imageUrls.length} created successfully`)
           } catch (jobErr: unknown) {
             console.error(`❌ Job ${i + 1}/${imageUrls.length} error:`, jobErr)
-            results.failed++
             const errMsg = jobErr instanceof Error ? jobErr.message : 'Unknown error'
+            
+            // Update job status to failed if job was created
+            if (separateJob?.id) {
+              await supabase
+                .from('jobs')
+                .update({ 
+                  status: 'failed',
+                  error: errMsg
+                })
+                .eq('id', separateJob.id)
+            }
+            
+            results.failed++
             results.errors.push(`Job ${i + 1}: ${errMsg}`)
           }
         }
