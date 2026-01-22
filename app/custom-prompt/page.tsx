@@ -598,12 +598,10 @@ export default function CustomPromptPage() {
         }
       }
 
-      // ✅ NOW upload images to Cloudinary (job already created)
-      const imageUrls = []
-      for (let i = 0; i < selectedImages.length; i++) {
-        const img = selectedImages[i]
-        setStatus(`กำลังอัพโหลดรูปที่ ${i + 1}/${selectedImages.length}...`)
-        
+      // ✅ Parallel upload with concurrency limit (3 at a time)
+      setStatus(`กำลังอัพโหลด ${selectedImages.length} รูป...`)
+      
+      const uploadImage = async (img: typeof selectedImages[0], index: number) => {
         try {
           if (img.url.includes('drive.google.com')) {
             const uploadRes = await fetch('/api/drive/download-and-upload', {
@@ -612,25 +610,42 @@ export default function CustomPromptPage() {
               body: JSON.stringify({ fileId: img.id, fileName: img.name }),
             })
             
-            if (uploadRes.ok) {
-              const { url } = await uploadRes.json()
-              imageUrls.push(url)
-            } else {
-              throw new Error(`Failed to upload image ${i + 1}`)
+            if (!uploadRes.ok) {
+              throw new Error(`Failed to upload image ${index + 1}`)
             }
+            
+            const { url } = await uploadRes.json()
+            return url
           } else {
-            imageUrls.push(img.url)
+            return img.url
           }
-        } catch (uploadError) {
-          // Mark all jobs as failed if image upload fails
-          for (const jobId of jobIds) {
-            await supabase.from('jobs').update({
-              status: 'failed',
-              error: uploadError instanceof Error ? uploadError.message : 'Image upload failed'
-            }).eq('id', jobId)
-          }
-          throw uploadError
+        } catch (error) {
+          throw new Error(`Image ${index + 1}: ${error instanceof Error ? error.message : 'Upload failed'}`)
         }
+      }
+
+      // Upload in batches of 3 for better performance
+      const imageUrls: string[] = []
+      const batchSize = 3
+      
+      try {
+        for (let i = 0; i < selectedImages.length; i += batchSize) {
+          const batch = selectedImages.slice(i, i + batchSize)
+          const batchPromises = batch.map((img, idx) => uploadImage(img, i + idx))
+          
+          setStatus(`อัพโหลด ${i + 1}-${Math.min(i + batchSize, selectedImages.length)}/${selectedImages.length}...`)
+          const batchResults = await Promise.all(batchPromises)
+          imageUrls.push(...batchResults)
+        }
+      } catch (uploadError) {
+        // Mark all jobs as failed if image upload fails
+        for (const jobId of jobIds) {
+          await supabase.from('jobs').update({
+            status: 'failed',
+            error: uploadError instanceof Error ? uploadError.message : 'Image upload failed'
+          }).eq('id', jobId)
+        }
+        throw uploadError
       }
 
       // Upload template image if enabled
