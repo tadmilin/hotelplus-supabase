@@ -26,6 +26,14 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // 🔥 Practical validation: 6 images for reliability (+ 1 template = 7 total)
+    if (templateUrl && imageUrls.length > 6) {
+      return NextResponse.json(
+        { error: 'For reliability, max 6 images (+ 1 template = 7 total). More images increase failure rate.' },
+        { status: 400 }
+      )
+    }
+
     // Always use Nano Banana Pro for custom prompt
     // Model ID: google/nano-banana-pro
     const model = 'google/nano-banana-pro'
@@ -34,16 +42,12 @@ export async function POST(req: NextRequest) {
     
     // If template is provided, use template + all images together
     if (templateUrl) {
-      // Template mode: template instructions + user prompt
-      finalPrompt = `[TEMPLATE MODE]ใช้ inputภาพแรกเป็นตัวอย่าง template รักษา Layout และกรอบดีไซน์จากภาพแรกไว้ให้เหมือน100% (กราฟิค, กรอบ)
+      // 🔥 Thai prompt - ชัดเจน แยก user instruction
+      finalPrompt = `ใช้รูปแรกเป็น template รักษา layout และดีไซน์ไว้
+      
+คำสั่ง: ${prompt}
 
-ขั้นตอน:
-1. ปรับแต่งภาพinput หลังรูปแรก(ตัวอย่างtemplate)ทั้งหมดตามคำขอ: ${prompt}
-2. ใช้รูปแรกหลัง Template เป็นภาพหลัก/Background/Hero Image ใหญ่สุด
-3. รูปลำดับถัดมา ใช้เป็นรูปเล็กหรือรูปประกอบในตำแหน่งรองที่เหมาะสม
-4. วางภาพใหม่ทั้งหมดในเลเยอร์ด้านหลัง 
-5. ลบข้อความตัวอักษรและตัวเลขทั้งหมดและโลโก้ออกโดยรักษาดีไซน์, โทนสี, และองค์ประกอบศิลป์อื่นๆ จากภาพตัวอย่างtemplateให้เหมือนเดิม
-6. ผลลัพธ์สุดท้ายควรเป็นภาพที่ปรับแต่งตามคำขอของผู้ใช้แต่ยังคงดีไซน์และโครงสร้างจากtemplate`
+วางรูปที่เหลือในองค์ประกอบตามคำสั่งข้างต้น`
       
       const input: Record<string, unknown> = {
         image_input: [templateUrl, ...imageUrls],
@@ -51,7 +55,10 @@ export async function POST(req: NextRequest) {
         aspect_ratio: outputSize || 'match_input_image',
         output_format: 'png',
         resolution: '1K',
+        safety_filter_level: 'block_only_high',
       }
+      
+      console.log(`🎨 Using resolution: 1K (${imageUrls.length + 1} images total, auto-upscale x2 enabled)`)
 
       const prediction = await replicate.predictions.create({
         model: model,
@@ -82,6 +89,7 @@ export async function POST(req: NextRequest) {
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
       resolution: '1K',
+      safety_filter_level: 'block_only_high', // 🔥 Same as Replicate web UI default
     }
 
     const prediction = await replicate.predictions.create({

@@ -532,6 +532,13 @@ export default function CustomPromptPage() {
       return
     }
 
+    // 🔥 Practical limit: 6 images for stability (+ 1 template = 7 total)
+    // Based on real-world testing: 6 images = reliable, 7+ = unstable
+    if (enableTemplate && selectedImagesMap.size > 6) {
+      alert('⚠️ แนะนำสูงสุด 6 รูป (+ template = 7 total)')
+      return
+    }
+
     setCreating(true)
     setStatus('กำลังเตรียมรูปภาพ...')
 
