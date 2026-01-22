@@ -246,7 +246,7 @@ export async function POST(req: NextRequest) {
         aspectRatio?: string;
         gptPredictions?: string[];
         totalPredictions?: number;
-        completedPredictions?: Array<{ id: string; urls: string[] }>;
+        // completedPredictions ย้ายไปเก็บใน job_predictions table แล้ว
       } | null
       
       if (metadata?.pipeline === 'gpt-with-template' && metadata?.step === 1 && webhook) {
@@ -267,51 +267,74 @@ export async function POST(req: NextRequest) {
             }
           }
           
-          // ใช้ atomic update เพื่อป้องกัน race condition
-          // เพิ่ม prediction นี้เข้า completedPredictions โดยใช้ SQL append
-          const newCompleted = { id: webhook.id, urls: permanentUrls }
+          // ✅ ใช้ INSERT เข้า job_predictions table (atomic, ไม่มี race condition)
+          // UNIQUE(job_id, prediction_id) ป้องกัน duplicate อัตโนมัติ
+          const { error: insertError } = await supabaseAdmin
+            .from('job_predictions')
+            .insert({
+              job_id: job.id,
+              prediction_id: webhook.id,
+              urls: permanentUrls,
+            })
           
-          // อ่าน job อีกครั้งเพื่อให้ได้ค่าล่าสุด (ป้องกัน race condition)
-          const { data: freshJob } = await supabaseAdmin
-            .from('jobs')
-            .select('metadata')
-            .eq('id', job.id)
-            .single()
-          
-          const freshMetadata = freshJob?.metadata as typeof metadata
-          const existingCompleted = freshMetadata?.completedPredictions || []
-          
-          // เช็คว่า prediction นี้ถูกเพิ่มไปแล้วหรือยัง (ป้องกัน duplicate)
-          const alreadyExists = existingCompleted.some((c: { id: string }) => c.id === webhook.id)
-          if (alreadyExists) {
-            console.log('⚠️ Prediction already processed, skipping:', webhook.id)
-            return NextResponse.json({ received: true, skipped: true })
+          if (insertError) {
+            // ถ้า duplicate (UNIQUE constraint) ให้ skip ไม่ต้องทำซ้ำ
+            if (insertError.code === '23505') {
+              console.log('⚠️ Prediction already processed (duplicate key), skipping:', webhook.id)
+              return NextResponse.json({ received: true, skipped: true })
+            }
+            console.error('❌ Failed to insert job_prediction:', insertError)
+            throw insertError
           }
           
-          // เพิ่มผลลัพธ์ใหม่
-          const updatedCompleted = [...existingCompleted, newCompleted]
+          console.log('✅ Inserted prediction to job_predictions:', webhook.id)
           
-          await supabaseAdmin
-            .from('jobs')
-            .update({
-              metadata: { ...freshMetadata, completedPredictions: updatedCompleted },
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', job.id)
+          // นับจำนวน predictions ที่เสร็จแล้ว (atomic count)
+          const { count: completedCount } = await supabaseAdmin
+            .from('job_predictions')
+            .select('*', { count: 'exact', head: true })
+            .eq('job_id', job.id)
+          
+          console.log(`📊 Progress: ${completedCount}/${metadata.totalPredictions}`)
           
           // เช็คว่าครบทุก predictions แล้วหรือยัง
-          if (updatedCompleted.length === metadata.totalPredictions) {
-            console.log('✅ All GPT Image predictions completed - Starting Step 2')
+          if (completedCount === metadata.totalPredictions) {
+            console.log('✅ All GPT Image predictions completed - Attempting to start Step 2')
             
-            // รวบรวม URLs ทั้งหมด
-            const allGptUrls = updatedCompleted.flatMap((c: { urls: string[] }) => c.urls)
+            // ⚠️ ป้องกัน race condition: ใช้ atomic UPDATE กับ condition
+            // เฉพาะ webhook แรกที่ UPDATE สำเร็จเท่านั้นที่จะเริ่ม Step 2
+            const { data: lockResult, error: lockError } = await supabaseAdmin
+              .from('jobs')
+              .update({ 
+                status: 'processing_template',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', job.id)
+              .eq('status', 'processing') // ต้องยังเป็น processing อยู่
+              .select('id')
+              .single()
+            
+            if (lockError || !lockResult) {
+              // webhook อื่นเริ่ม Step 2 ไปแล้ว
+              console.log('⚠️ Step 2 already started by another webhook, skipping')
+              return NextResponse.json({ received: true, skipped: true })
+            }
+            
+            console.log('🔒 Lock acquired - Starting Step 2')
+            
+            // ดึง URLs ทั้งหมดจาก job_predictions
+            const { data: allPredictions } = await supabaseAdmin
+              .from('job_predictions')
+              .select('urls')
+              .eq('job_id', job.id)
+            
+            const allGptUrls = allPredictions?.flatMap(p => p.urls) || []
             
             // Update job with GPT results
             await supabaseAdmin
               .from('jobs')
               .update({
                 output_urls: allGptUrls,
-                status: 'processing_template',
               })
               .eq('id', job.id)
             
@@ -348,7 +371,7 @@ Steps:
                 .from('jobs')
                 .update({
                   replicate_id: gptTemplatePrediction.id,
-                  metadata: { ...freshMetadata, step: 2, completedPredictions: updatedCompleted, templateStartedAt: new Date().toISOString() }
+                  metadata: { ...metadata, step: 2, templateStartedAt: new Date().toISOString() }
                 })
                 .eq('id', job.id)
 
@@ -367,7 +390,7 @@ Steps:
                 .eq('id', job.id)
             }
           } else {
-            console.log(`⏳ Waiting for more predictions: ${updatedCompleted.length}/${metadata.totalPredictions}`)
+            console.log(`⏳ Waiting for more predictions: ${completedCount}/${metadata.totalPredictions}`)
           }
           
           return NextResponse.json({ success: true })
