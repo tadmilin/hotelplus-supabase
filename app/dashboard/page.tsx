@@ -397,7 +397,7 @@ export default function DashboardPage() {
                   👑 ADMIN MODE
                 </span>
                 <a
-                  href="https://docs.google.com/spreadsheets/d/1voWGRqibBJVPi0fU7DgTDxrNePtx4kK4sG_NQnVdXVQ/edit?gid=0#gid=0"
+                  href="https://docs.google.com/spreadsheets/d/1voWGRqibBJVPi0fU7DgTDxrNePtx4kK4sG_NQnVdXVQ/edit?usp=sharing"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1 bg-green-100 hover:bg-green-200 border-2 border-green-400 text-green-800 rounded-full text-sm font-bold transition-colors flex items-center gap-1"
