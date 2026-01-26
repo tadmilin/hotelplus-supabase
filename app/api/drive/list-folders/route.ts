@@ -278,17 +278,19 @@ async function getFolderStructure(
   }
 
   try {
-    // Check if this is a Shared Drive or a regular folder
-    const isSharedDrive = driveId !== 'my-drive' && !driveId.startsWith('1')
+    // 🔥 FIX: ตรวจสอบว่า driveId เป็น Shared Drive ID หรือ folder ID
+    // Shared Drive ID format: 0A... หรือ 0B... (ไม่ขึ้นต้นด้วย 1)
+    // Folder ID format: 1... 
+    const isSharedDrive = !driveId.startsWith('1')
     
-    let query: string
     let listOptions: drive_v3.Params$Resource$Files$List
     
     if (isSharedDrive) {
-      // Shared Drive: use driveId and corpora
-      query = parentId
-        ? `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-        : `mimeType='application/vnd.google-apps.folder' and trashed=false`
+      // Shared Drive: ใช้ corpora='drive' + driveId
+      // 🔥 FIX: สำหรับ root level ของ Shared Drive ให้ใช้ driveId เป็น parent
+      // เพราะ Shared Drive root folders มี parent = driveId
+      const effectiveParent = parentId || driveId
+      const query = `'${effectiveParent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
       
       listOptions = {
         corpora: 'drive',
@@ -296,16 +298,17 @@ async function getFolderStructure(
         includeItemsFromAllDrives: true,
         supportsAllDrives: true,
         q: query,
-        pageSize: 1000, // 🚀 เพิ่มจาก 100 → 1000 (max ของ Drive API)
+        pageSize: 1000,
       }
     } else {
-      // Regular folder: use parent folder as starting point
-      const folderId = parentId || driveId
-      query = `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+      // Regular folder ที่ share มา: ใช้ corpora='user'
+      // ถ้าไม่มี parentId ให้ใช้ driveId เป็น parent
+      const effectiveParent = parentId || driveId
+      const query = `'${effectiveParent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
       
       listOptions = {
         q: query,
-        pageSize: 1000, // 🚀 เพิ่มจาก 100 → 1000
+        pageSize: 1000,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       }
