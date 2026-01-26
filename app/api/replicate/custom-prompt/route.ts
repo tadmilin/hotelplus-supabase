@@ -8,7 +8,7 @@ const replicate = new Replicate({
 
 export async function POST(req: NextRequest) {
   let jobId: string | null = null
-  
+
   try {
     const body = await req.json()
     jobId = body.jobId
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     const validImageUrls = imageUrls.filter(url => url && typeof url === 'string' && url.trim() !== '')
-    
+
     if (validImageUrls.length === 0) {
       return NextResponse.json(
         { error: 'No valid image URLs provided' },
@@ -58,18 +58,14 @@ export async function POST(req: NextRequest) {
     // Always use Nano Banana Pro for custom prompt
     // Model ID: google/nano-banana-pro
     const model = 'google/nano-banana-pro'
-    
+
     let finalPrompt = prompt
-    
+
     // If template is provided, use template + all images together
     if (templateUrl) {
       // 🔥 Thai prompt - ชัดเจน แยก user instruction
-      finalPrompt = `ใช้รูปแรกเป็น template รักษา layout และดีไซน์ไว้
-      
-คำสั่ง: ${prompt}
+      finalPrompt = `ใช้รูปแรกเป็น template รักษา layoutและดีไซน์ไว้คงเดิมทั้งหมด แก้ไขรูปภาพที่เหลือตามคำสั่ง: ${prompt} จากนั้นวางรูปที่เหลือทั้งหมดตามลำดับโดยให้รูปที่แก้ไขรูปแรก(รูปถัดจากtemplate)เป็นรูปheroหรือรูปใหญ่ที่สุดในtemplateและลบข้อความตัวอักษรตัวเลขโลโก้ทั้งหมดออกจากภาพให้ด้วย`
 
-วางรูปที่เหลือทั้งหมดในองค์ประกอบตามคำสั่งข้างต้นและลบข้อความตัวอักษรตัวเลขทั้งหมดออกจากภาพให้ด้วย`
-      
       const input: Record<string, unknown> = {
         image_input: [templateUrl, ...validImageUrls],
         prompt: finalPrompt,
@@ -78,7 +74,7 @@ export async function POST(req: NextRequest) {
         resolution: '1K',
         safety_filter_level: 'block_only_high',
       }
-      
+
       console.log(`🎨 Using resolution: 1K (${validImageUrls.length + 1} images total, auto-upscale x2 enabled)`)
 
       // Retry logic for Replicate API (max 3 attempts)
@@ -98,16 +94,16 @@ export async function POST(req: NextRequest) {
         } catch (apiError: unknown) {
           const error = apiError as { response?: { status?: number }; message?: string }
           const isLastAttempt = attempt === maxRetries
-          
+
           if (isLastAttempt) {
             console.error(`❌ Failed after ${maxRetries} attempts:`, error.message)
             throw apiError
           }
-          
+
           // Calculate backoff delay
           const isRateLimit = error?.response?.status === 429
           const backoffMs = isRateLimit ? 2000 * attempt : 1000 * attempt
-          
+
           console.log(`⚠️ Attempt ${attempt} failed (${isRateLimit ? 'rate limit' : 'error'}), retrying in ${backoffMs}ms...`)
           await new Promise(resolve => setTimeout(resolve, backoffMs))
         }
@@ -135,7 +131,7 @@ export async function POST(req: NextRequest) {
         status: prediction.status,
       })
     }
-    
+
     // NO TEMPLATE: Create separate prediction for EACH image
     // Only use first image for this prediction (Frontend will handle creating multiple jobs)
     const input: Record<string, unknown> = {
@@ -164,15 +160,15 @@ export async function POST(req: NextRequest) {
       } catch (apiError: unknown) {
         const error = apiError as { response?: { status?: number }; message?: string }
         const isLastAttempt = attempt === maxRetries
-        
+
         if (isLastAttempt) {
           console.error(`❌ Failed after ${maxRetries} attempts:`, error.message)
           throw apiError
         }
-        
+
         const isRateLimit = error?.response?.status === 429
         const backoffMs = isRateLimit ? 2000 * attempt : 1000 * attempt
-        
+
         console.log(`⚠️ Attempt ${attempt} failed (${isRateLimit ? 'rate limit' : 'error'}), retrying in ${backoffMs}ms...`)
         await new Promise(resolve => setTimeout(resolve, backoffMs))
       }
@@ -202,23 +198,23 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     console.error('❌ Custom Prompt API error:', error)
     const errorMessage = error instanceof Error ? error.message : 'Failed to create prediction'
-    
+
     // Update job status to failed
     if (jobId) {
       try {
         const supabase = await createClient()
         await supabase
           .from('jobs')
-          .update({ 
+          .update({
             status: 'failed',
-            error: errorMessage 
+            error: errorMessage
           })
           .eq('id', jobId)
       } catch (updateError) {
         console.error('Failed to update job status:', updateError)
       }
     }
-    
+
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

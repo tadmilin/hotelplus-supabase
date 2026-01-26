@@ -73,13 +73,7 @@ export async function POST(request: NextRequest) {
         })
 
         // เตรียม prompt สำหรับ template mode
-        const templatePrompt = `ใช้รูปแรกเป็น template รักษา layout โครงสร้างและกราฟิค ดีไซน์ไว้
-      
-คำสั่งแก้ไขรูปที่เหลือ : ${prompt}
-
-ใช้รูปลำดับอื่นๆที่เหลือแทนรูปในtemplateรูปแรกตามลำดับครบถ้วนทุกภาพและลบข้อความตัวอักษรตัวเลขทั้งหมดออกจากภาพให้ด้วย
-
-`
+        const templatePrompt = `ใช้รูปแรกเป็น template รักษา layoutและดีไซน์ไว้คงเดิมทั้งหมด แก้ไขรูปภาพที่เหลือตามคำสั่ง: ${prompt} จากนั้นวางรูปที่เหลือทั้งหมดตามลำดับโดยให้รูปที่แก้ไขรูปแรก(รูปถัดจากtemplate)เป็นรูปheroหรือรูปใหญ่ที่สุดในtemplateและลบข้อความตัวอักษรตัวเลขโลโก้ทั้งหมดออกจากภาพให้ด้วย`
 
         // รวม template + input images ทั้งหมดเป็น array เดียว
         const allInputImages = [templateUrl, ...validInputImages]
