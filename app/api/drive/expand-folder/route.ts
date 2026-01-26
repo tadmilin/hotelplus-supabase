@@ -27,10 +27,11 @@ export async function POST(req: NextRequest) {
       corpora?: string
       driveId?: string
       includeItemsFromAllDrives?: boolean
+      pageToken?: string
     } = {
       q: query,
-      fields: 'files(id, name)',
-      pageSize: 100,
+      fields: 'files(id, name), nextPageToken', // 🚀 เพิ่ม nextPageToken
+      pageSize: 1000, // 🚀 เพิ่มจาก 100 → 1000
       supportsAllDrives: true,
     }
 
@@ -40,14 +41,29 @@ export async function POST(req: NextRequest) {
       listOptions.includeItemsFromAllDrives = true
     }
 
-    const response = await drive.files.list(listOptions)
-    const folders = (response.data.files || []).map(folder => ({
-      id: folder.id!,
-      name: folder.name!,
-      children: [], // ⚡ Lazy - ไม่ดึง children ลึกลงไป
-    }))
+    // 🚀 Pagination loop - ดึงให้ครบทุกโฟลเดอร์
+    const allFolders: Array<{ id: string; name: string; children: [] }> = []
+    let nextPageToken: string | undefined = undefined
 
-    return NextResponse.json({ folders })
+    do {
+      const response = await drive.files.list({
+        ...listOptions,
+        pageToken: nextPageToken,
+      })
+      
+      const folders = (response.data.files || []).map(folder => ({
+        id: folder.id!,
+        name: folder.name!,
+        children: [] as [], // ⚡ Lazy - ไม่ดึง children ลึกลงไป
+      }))
+      
+      allFolders.push(...folders)
+      nextPageToken = response.data.nextPageToken || undefined
+      
+      console.log(`📁 expand-folder: fetched ${folders.length}, total: ${allFolders.length}`)
+    } while (nextPageToken)
+
+    return NextResponse.json({ folders: allFolders })
   } catch (error) {
     console.error('Error expanding folder:', error)
     return NextResponse.json(

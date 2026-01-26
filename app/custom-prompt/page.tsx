@@ -820,8 +820,11 @@ export default function CustomPromptPage() {
               <div className="flex flex-col gap-1">
                 <button
                   onClick={async () => {
-                    // ลบ cache ก่อนโหลดใหม่
+                    // ลบ cache ทั้ง localStorage และ server
                     localStorage.removeItem('drive_folders_cache')
+                    try {
+                      await fetch('/api/drive/list-folders', { method: 'DELETE' })
+                    } catch {}
                     await syncDrives()
                     await fetchDriveFolders()
                   }}

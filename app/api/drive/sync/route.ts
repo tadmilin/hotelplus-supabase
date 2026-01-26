@@ -22,33 +22,54 @@ export async function POST() {
     }
 
     // Fetch drives from Google
-    // Try Shared Drives first
+    // 🚀 Pagination loop - ดึง Shared Drives ทั้งหมด
     console.log('🔍 Fetching Shared Drives...')
-    const response = await drive.drives.list({ pageSize: 100 })
-    let drives = response.data.drives || []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let drives: any[] = []
+    let nextPageToken: string | undefined = undefined
+
+    do {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response: any = await drive.drives.list({ 
+        pageSize: 100,
+        pageToken: nextPageToken,
+        fields: 'drives(id, name), nextPageToken'
+      })
+      drives.push(...(response.data.drives || []))
+      nextPageToken = response.data.nextPageToken || undefined
+      console.log(`📁 Fetched ${response.data.drives?.length || 0} drives, total: ${drives.length}`)
+    } while (nextPageToken)
+
     console.log(`✅ Found ${drives.length} Shared Drives`)
 
     // If no Shared Drives, check for shared folders in My Drive
     if (drives.length === 0) {
       console.log('⚠️ No Shared Drives found. Checking for shared folders...')
       
-      // Try to list files that are shared with the service account
-      const sharedResponse = await drive.files.list({
-        q: "mimeType='application/vnd.google-apps.folder' and sharedWithMe=true and trashed=false",
-        pageSize: 100,
-        fields: 'files(id, name, owners)',
-        supportsAllDrives: true
-      })
+      // 🚀 Pagination loop สำหรับ shared folders ด้วย
+      nextPageToken = undefined
+      do {
+        const sharedResponse = await drive.files.list({
+          q: "mimeType='application/vnd.google-apps.folder' and sharedWithMe=true and trashed=false",
+          pageSize: 1000, // 🚀 เพิ่มจาก 100
+          fields: 'files(id, name, owners), nextPageToken',
+          supportsAllDrives: true,
+          pageToken: nextPageToken,
+        })
+        
+        console.log(`📁 Found ${sharedResponse.data.files?.length || 0} shared folders (page)`)
+        
+        // Convert shared folders to drive format
+        if (sharedResponse.data.files && sharedResponse.data.files.length > 0) {
+          drives.push(...sharedResponse.data.files.map(folder => ({
+            id: folder.id!,
+            name: folder.name!
+          })))
+        }
+        nextPageToken = sharedResponse.data.nextPageToken || undefined
+      } while (nextPageToken)
       
-      console.log(`📁 Found ${sharedResponse.data.files?.length || 0} shared folders`)
-      
-      // Convert shared folders to drive format
-      if (sharedResponse.data.files && sharedResponse.data.files.length > 0) {
-        drives = sharedResponse.data.files.map(folder => ({
-          id: folder.id!,
-          name: folder.name!
-        }))
-      }
+      console.log(`📁 Total shared folders: ${drives.length}`)
     }
 
     if (drives.length === 0) {

@@ -1012,6 +1012,11 @@ export default function GptImagePage() {
               </button>
               <button
                 onClick={async () => {
+                  // ลบ cache ทั้ง localStorage และ server
+                  localStorage.removeItem('drive_folders_cache')
+                  try {
+                    await fetch('/api/drive/list-folders', { method: 'DELETE' })
+                  } catch {}
                   await syncDrives()
                   await fetchDriveFolders()
                 }}
