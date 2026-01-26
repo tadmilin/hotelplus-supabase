@@ -48,7 +48,8 @@ export function FolderTree({
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  <span>{folder.children && folder.children.length > 0 ? '📁' : '📄'}</span>
+                  {/* 📁 = folder ที่มี sub-folder, 📂 = folder ที่ไม่มี sub-folder (leaf folder) */}
+                  <span>{folder.children && folder.children.length > 0 ? '📁' : '📂'}</span>
                   <span>{folder.name}</span>
                 </span>
                 {hasImages && (

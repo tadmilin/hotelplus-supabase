@@ -25,7 +25,7 @@ export async function POST() {
     // 🚀 Pagination loop - ดึง Shared Drives ทั้งหมด
     console.log('🔍 Fetching Shared Drives...')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let drives: any[] = []
+    let drives: { id: string; name: string; type: 'shared_drive' | 'shared_folder' }[] = []
     let nextPageToken: string | undefined = undefined
 
     do {
@@ -35,7 +35,13 @@ export async function POST() {
         pageToken: nextPageToken,
         fields: 'drives(id, name), nextPageToken'
       })
-      drives.push(...(response.data.drives || []))
+      // 🔥 Mark as shared_drive
+      const sharedDrives = (response.data.drives || []).map((d: { id: string; name: string }) => ({
+        id: d.id,
+        name: d.name,
+        type: 'shared_drive' as const
+      }))
+      drives.push(...sharedDrives)
       nextPageToken = response.data.nextPageToken || undefined
       console.log(`📁 Fetched ${response.data.drives?.length || 0} drives, total: ${drives.length}`)
     } while (nextPageToken)
@@ -63,9 +69,11 @@ export async function POST() {
         // Convert shared folders to drive format
         if (sharedResponse.data.files && sharedResponse.data.files.length > 0) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // 🔥 Mark as shared_folder
           drives.push(...sharedResponse.data.files.map((folder: any) => ({
             id: folder.id!,
-            name: folder.name!
+            name: folder.name!,
+            type: 'shared_folder' as const
           })))
         }
         nextPageToken = sharedResponse.data.nextPageToken || undefined
@@ -94,6 +102,7 @@ export async function POST() {
     const driveData = drives.map(d => ({
       drive_id: d.id!,
       drive_name: d.name!,
+      drive_type: d.type, // 🔥 เก็บ type ด้วย
       synced_at: new Date().toISOString()
     }))
 

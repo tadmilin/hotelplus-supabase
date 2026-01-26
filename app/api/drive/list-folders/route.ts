@@ -76,7 +76,7 @@ export async function GET() {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
-    let drivesToLoad: Array<{ driveId: string; driveName: string }> = []
+    let drivesToLoad: Array<{ driveId: string; driveName: string; driveType: string }> = []
     
     if (user) {
       // Try to get user's selected drives from database
@@ -86,7 +86,8 @@ export async function GET() {
           drive_id,
           google_drives (
             drive_id,
-            drive_name
+            drive_name,
+            drive_type
           )
         `)
         .eq('user_id', user.id)
@@ -98,24 +99,26 @@ export async function GET() {
         // Filter out null google_drives (invalid references)
         drivesToLoad = userDrives
           .filter((item) => {
-            const driveData = (item as unknown as { google_drives: { drive_id: string; drive_name: string } | null }).google_drives
+            const driveData = (item as unknown as { google_drives: { drive_id: string; drive_name: string; drive_type: string } | null }).google_drives
             return driveData !== null
           })
           .map((item) => ({
             driveId: (item as unknown as { google_drives: { drive_id: string } }).google_drives.drive_id,
-            driveName: (item as unknown as { google_drives: { drive_name: string } }).google_drives.drive_name
+            driveName: (item as unknown as { google_drives: { drive_name: string } }).google_drives.drive_name,
+            driveType: (item as unknown as { google_drives: { drive_type: string } }).google_drives.drive_type || 'shared_drive'
           }))
         
         if (drivesToLoad.length === 0) {
           console.log(`⚠️ User has selections but no valid drives found, showing all synced drives`)
           const { data: allDrives } = await supabase
             .from('google_drives')
-            .select('drive_id, drive_name')
+            .select('drive_id, drive_name, drive_type')
             .order('drive_name')
           
           drivesToLoad = (allDrives || []).map(d => ({
             driveId: d.drive_id,
-            driveName: d.drive_name
+            driveName: d.drive_name,
+            driveType: d.drive_type || 'shared_drive'
           }))
         }
       } else {
@@ -123,24 +126,26 @@ export async function GET() {
         console.log(`ℹ️ No drive selection for user ${user.email}, showing all synced drives`)
         const { data: allDrives } = await supabase
           .from('google_drives')
-          .select('drive_id, drive_name')
+          .select('drive_id, drive_name, drive_type')
           .order('drive_name')
         
         drivesToLoad = (allDrives || []).map(d => ({
           driveId: d.drive_id,
-          driveName: d.drive_name
+          driveName: d.drive_name,
+          driveType: d.drive_type || 'shared_drive'
         }))
       }
     } else {
       // Not logged in - show all synced drives
       const { data: allDrives } = await supabase
         .from('google_drives')
-        .select('drive_id, drive_name')
+        .select('drive_id, drive_name, drive_type')
         .order('drive_name')
       
       drivesToLoad = (allDrives || []).map(d => ({
         driveId: d.drive_id,
-        driveName: d.drive_name
+        driveName: d.drive_name,
+        driveType: d.drive_type || 'shared_drive'
       }))
     }
     
@@ -178,15 +183,16 @@ export async function GET() {
               cached: true,
             }
           }
-        } catch (cacheCheckError) {
+        } catch {
           // Cache table might not exist - continue without cache
           console.log(`⚠️ Cache check failed for ${driveItem.driveName}, fetching fresh...`)
         }
 
         // Cache MISS - fetch from Google Drive
-        console.log(`⚠️ Cache MISS: ${driveItem.driveName} - fetching from Google...`)
+        console.log(`⚠️ Cache MISS: ${driveItem.driveName} (type: ${driveItem.driveType}) - fetching from Google...`)
         const startTime = Date.now()
-        const folders = await getFolderStructure(drive, driveItem.driveId)
+        const isSharedDrive = driveItem.driveType === 'shared_drive'
+        const folders = await getFolderStructure(drive, driveItem.driveId, isSharedDrive)
         const duration = ((Date.now() - startTime) / 1000).toFixed(1)
         
         // Count total folders (recursive)
@@ -211,7 +217,7 @@ export async function GET() {
               access_count: 1
             }, { onConflict: 'drive_id' })
           console.log(`💾 Cached: ${driveItem.driveName}`)
-        } catch (cacheSaveError) {
+        } catch {
           // Cache table might not exist - continue without caching
           console.log(`⚠️ Could not cache ${driveItem.driveName} - table may not exist`)
         }
@@ -267,6 +273,7 @@ async function listAllFolders(
 async function getFolderStructure(
   drive: drive_v3.Drive, 
   driveId: string, 
+  isSharedDrive: boolean,
   parentId?: string,
   depth: number = 0
 ): Promise<FolderStructure[]> {
@@ -278,20 +285,18 @@ async function getFolderStructure(
   }
 
   try {
-    // 🔥 FIX: ตรวจสอบว่า driveId เป็น Shared Drive ID หรือ folder ID
-    // Shared Drive ID format: 0A... หรือ 0B... (ไม่ขึ้นต้นด้วย 1)
-    // Folder ID format: 1... 
-    const isSharedDrive = !driveId.startsWith('1')
+    // 🔥 FIX: สำหรับ root level ให้ใช้ driveId เป็น parent
+    // สำหรับ sub-folder ให้ใช้ parentId
+    const effectiveParent = parentId || driveId
+    const query = `'${effectiveParent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+    
+    console.log(`🔍 [Depth ${depth}] Query folders: driveId=${driveId}, parentId=${parentId || 'ROOT'}, isSharedDrive=${isSharedDrive}`)
+    console.log(`🔍 Query: ${query}`)
     
     let listOptions: drive_v3.Params$Resource$Files$List
     
     if (isSharedDrive) {
       // Shared Drive: ใช้ corpora='drive' + driveId
-      // 🔥 FIX: สำหรับ root level ของ Shared Drive ให้ใช้ driveId เป็น parent
-      // เพราะ Shared Drive root folders มี parent = driveId
-      const effectiveParent = parentId || driveId
-      const query = `'${effectiveParent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-      
       listOptions = {
         corpora: 'drive',
         driveId: driveId,
@@ -302,10 +307,6 @@ async function getFolderStructure(
       }
     } else {
       // Regular folder ที่ share มา: ใช้ corpora='user'
-      // ถ้าไม่มี parentId ให้ใช้ driveId เป็น parent
-      const effectiveParent = parentId || driveId
-      const query = `'${effectiveParent}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-      
       listOptions = {
         q: query,
         pageSize: 1000,
@@ -317,9 +318,14 @@ async function getFolderStructure(
     // 🚀 ใช้ pagination loop ดึงให้ครบทุกโฟลเดอร์
     const folders = await listAllFolders(drive, listOptions)
     
+    console.log(`📁 [Depth ${depth}] Found ${folders.length} folders under parent=${effectiveParent}`)
+    if (folders.length > 0) {
+      console.log(`📁 Folders: ${folders.map(f => f.name).join(', ')}`)
+    }
+    
     // ⚡ Recursion ดึง children แบบ parallel + concurrency limit (ป้องกัน rate limit)
     const tasks = folders.map((folder) => async () => {
-      const children = await getFolderStructure(drive, driveId, folder.id!, depth + 1)
+      const children = await getFolderStructure(drive, driveId, isSharedDrive, folder.id!, depth + 1)
       return {
         id: folder.id!,
         name: folder.name!,
