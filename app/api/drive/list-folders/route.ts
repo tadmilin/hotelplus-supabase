@@ -163,15 +163,13 @@ export async function GET() {
             console.log(`✅ Cache HIT: ${driveItem.driveName} (${cached.folder_count} folders)`)
             
             // Update access stats (async, don't wait)
-            supabaseAdmin
+            void supabaseAdmin
               .from('drive_folder_structure_cache')
               .update({
                 last_accessed_at: new Date().toISOString(),
                 access_count: (cached.access_count || 0) + 1
               })
               .eq('drive_id', driveItem.driveId)
-              .then(() => {})
-              .catch(() => {}) // Ignore errors
 
             return {
               driveId: driveItem.driveId,
@@ -249,7 +247,8 @@ async function listAllFolders(
   let nextPageToken: string | undefined = undefined
 
   do {
-    const response = await drive.files.list({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response: any = await drive.files.list({
       ...listOptions,
       pageToken: nextPageToken,
       fields: 'files(id, name), nextPageToken', // ✅ เพิ่ม nextPageToken

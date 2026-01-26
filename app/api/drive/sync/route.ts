@@ -49,7 +49,8 @@ export async function POST() {
       // 🚀 Pagination loop สำหรับ shared folders ด้วย
       nextPageToken = undefined
       do {
-        const sharedResponse = await drive.files.list({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sharedResponse: any = await drive.files.list({
           q: "mimeType='application/vnd.google-apps.folder' and sharedWithMe=true and trashed=false",
           pageSize: 1000, // 🚀 เพิ่มจาก 100
           fields: 'files(id, name, owners), nextPageToken',
@@ -61,7 +62,8 @@ export async function POST() {
         
         // Convert shared folders to drive format
         if (sharedResponse.data.files && sharedResponse.data.files.length > 0) {
-          drives.push(...sharedResponse.data.files.map(folder => ({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          drives.push(...sharedResponse.data.files.map((folder: any) => ({
             id: folder.id!,
             name: folder.name!
           })))

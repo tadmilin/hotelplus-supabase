@@ -46,12 +46,14 @@ export async function POST(req: NextRequest) {
     let nextPageToken: string | undefined = undefined
 
     do {
-      const response = await drive.files.list({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response: any = await drive.files.list({
         ...listOptions,
         pageToken: nextPageToken,
       })
       
-      const folders = (response.data.files || []).map(folder => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const folders = (response.data.files || []).map((folder: any) => ({
         id: folder.id!,
         name: folder.name!,
         children: [] as [], // ⚡ Lazy - ไม่ดึง children ลึกลงไป
