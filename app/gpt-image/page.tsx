@@ -1133,20 +1133,28 @@ export default function GptImagePage() {
 
                   {/* Folder Tree */}
                   <div className="max-h-64 overflow-y-auto pr-2 mb-3">
-                    {driveFolders.map((drive) => (
-                      <div key={`template-${drive.driveId}`} className="mb-4">
-                        <h5 className="text-xs font-semibold text-blue-700 mb-2">
-                          🎨 {drive.driveName}
-                        </h5>
-                        <FolderTree
-                          folders={drive.folders}
-                          onSelectFolder={setTemplateFolderId}
-                          selectedFolderId={templateFolderId}
-                          onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
-                          driveId={drive.driveId}
-                        />
-                      </div>
-                    ))}
+                    {driveFolders.map((drive) => {
+                      // 🔍 กรองโฟลเดอร์ตามคำค้นหา (ใช้ templateSearch)
+                      const filteredTemplateFolders = filterFoldersBySearch(drive.folders, templateSearch)
+                      
+                      // ถ้าไม่มีโฟลเดอร์ที่ตรงเงื่อนไข ไม่แสดง drive นี้
+                      if (templateSearch && filteredTemplateFolders.length === 0) return null
+                      
+                      return (
+                        <div key={`template-${drive.driveId}`} className="mb-4">
+                          <h5 className="text-xs font-semibold text-blue-700 mb-2">
+                            🎨 {drive.driveName}
+                          </h5>
+                          <FolderTree
+                            folders={filteredTemplateFolders}
+                            onSelectFolder={setTemplateFolderId}
+                            selectedFolderId={templateFolderId}
+                            onDeleteFolder={(folderId, folderName) => excludeFolder(folderId, folderName, drive.driveId)}
+                            driveId={drive.driveId}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
 
                   {/* Upload Button */}
