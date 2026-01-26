@@ -287,7 +287,8 @@ export default function GptImagePage() {
       }))
   }
 
-  // 🔍 ฟังก์ชันกรองโฟลเดอร์ตามคำค้นหา (exact substring match)
+  // 🔍 ฟังก์ชันกรองโฟลเดอร์ตามคำค้นหา
+  // ถ้าโฟลเดอร์ match → แสดง children ทั้งหมดด้วย (ไม่ filter children)
   function filterFoldersBySearch(folders: TreeFolder[], searchTerm: string): TreeFolder[] {
     if (!searchTerm) return folders
     
@@ -295,18 +296,23 @@ export default function GptImagePage() {
     const filtered: TreeFolder[] = []
     
     for (const folder of folders) {
-      // ✅ ตรวจสอบว่าชื่อโฟลเดอร์มีคำค้นหาหรือไม่ (exact substring)
+      // ✅ ตรวจสอบว่าชื่อโฟลเดอร์มีคำค้นหาหรือไม่
       const nameMatch = folder.name.toLowerCase().includes(searchLower)
       
-      // ตรวจสอบ children ด้วย
-      const filteredChildren = folder.children ? filterFoldersBySearch(folder.children, searchTerm) : []
-      
-      // ถ้าชื่อตรง หรือมี children ที่ตรง → เอาไว้
-      if (nameMatch || filteredChildren.length > 0) {
-        filtered.push({
-          ...folder,
-          children: filteredChildren
-        })
+      if (nameMatch) {
+        // 🔥 ถ้าชื่อตรง → เอาโฟลเดอร์นี้ พร้อม children ทั้งหมด (ไม่ filter)
+        filtered.push(folder)
+      } else {
+        // ถ้าชื่อไม่ตรง → ลองหาใน children
+        const filteredChildren = folder.children ? filterFoldersBySearch(folder.children, searchTerm) : []
+        
+        if (filteredChildren.length > 0) {
+          // มี children ที่ตรง → เอา parent ไว้ด้วย
+          filtered.push({
+            ...folder,
+            children: filteredChildren
+          })
+        }
       }
     }
     
