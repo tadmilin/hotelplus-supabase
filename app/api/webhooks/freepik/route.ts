@@ -183,9 +183,6 @@ async function handleImageToPromptComplete(
 
     const metadata = job.metadata as JobMetadata
     
-    // Combine template prompt (style) with custom prompt (what to do)
-    const combinedPrompt = `${metadata.customPrompt}. Style reference: ${templatePrompt}`
-    
     // Update metadata with template prompt
     const updatedMetadata: JobMetadata = {
       ...metadata,
@@ -194,20 +191,73 @@ async function handleImageToPromptComplete(
 
     // Build webhook URL for next step
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-    const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=improve-prompt&jobId=${jobId}`
+    
+    // Check if improve prompt is enabled
+    if (metadata.enableImprovePrompt) {
+      // Combine as edit instruction (not description)
+      const editPrompt = `Edit the image: ${metadata.customPrompt}. Use the following style elements: ${templatePrompt.substring(0, 500)}`
+      
+      const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=improve-prompt&jobId=${jobId}`
+      const result = await improvePrompt(editPrompt, 'image', webhookUrl)
+      const taskId = result.data.task_id
 
-    // Call Improve Prompt API with webhook
-    const result = await improvePrompt(combinedPrompt, 'image', webhookUrl)
+      console.log('✅ Improve Prompt task created:', taskId)
+
+      await supabaseAdmin
+        .from('jobs')
+        .update({
+          freepik_task_id: taskId,
+          freepik_status: 'IMPROVE_PROMPT',
+          freepik_step: 'improve-prompt',
+          metadata: updatedMetadata,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', jobId)
+
+      return { success: true }
+    }
+    
+    // Skip improve prompt → go directly to Seedream
+    console.log('⏭️ Skipping Improve Prompt, going directly to Seedream...')
+    
+    // Simple edit instruction
+    const finalPrompt = appendNoTextInstructions(
+      `Edit the image: ${metadata.customPrompt}. Keep the original composition but apply changes as requested.`
+    )
+    
+    const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=seedream-edit&jobId=${jobId}`
+    
+    // Validate reference images
+    const validUrls = metadata.imageUrls.filter(url => {
+      try {
+        new URL(url)
+        return url.startsWith('http://') || url.startsWith('https://')
+      } catch {
+        return false
+      }
+    })
+
+    if (validUrls.length === 0) {
+      throw new Error('No valid image URLs found')
+    }
+    
+    const result = await seedreamEdit({
+      prompt: finalPrompt,
+      referenceImages: validUrls,
+      webhookUrl,
+      aspectRatio: metadata.aspectRatio as 'square_1_1' | 'widescreen_16_9' | 'social_story_9_16' | 'portrait_2_3' | 'traditional_3_4' | 'standard_3_2' | 'classic_4_3' | 'cinematic_21_9',
+    })
     const taskId = result.data.task_id
 
-    console.log('✅ Improve Prompt task created:', taskId)
+    console.log('✅ Seedream Edit task created (from template):', taskId)
 
     await supabaseAdmin
       .from('jobs')
       .update({
         freepik_task_id: taskId,
-        freepik_status: 'IMPROVE_PROMPT',
-        freepik_step: 'improve-prompt',
+        freepik_status: 'SEEDREAM_GENERATING',
+        freepik_step: 'seedream-edit',
+        prompt: finalPrompt,
         metadata: updatedMetadata,
         updated_at: new Date().toISOString(),
       })
@@ -215,7 +265,7 @@ async function handleImageToPromptComplete(
 
     return { success: true }
   } catch (error) {
-    console.error('❌ Failed to trigger Improve Prompt:', error)
+    console.error('❌ Failed to handle Image to Prompt:', error)
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
