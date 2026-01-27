@@ -113,7 +113,21 @@ async function freepikFetch<T>(
   })
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({})) as FreepikErrorResponse
+    const errorText = await response.text()
+    console.error('❌ Freepik API error response:', errorText)
+    
+    let errorData: FreepikErrorResponse = { message: '' }
+    try {
+      errorData = JSON.parse(errorText) as FreepikErrorResponse
+    } catch {
+      // Not JSON
+    }
+    
+    // Log invalid_params for debugging
+    if (errorData.invalid_params) {
+      console.error('❌ Invalid params:', JSON.stringify(errorData.invalid_params, null, 2))
+    }
+    
     throw new Error(
       errorData.message || `Freepik API error: ${response.status} ${response.statusText}`
     )
@@ -266,6 +280,9 @@ export async function getMysticStatus(
 export async function seedreamEdit(
   input: SeedreamEditInput
 ): Promise<FreepikTaskResponse> {
+  // Log URLs for debugging
+  console.log('🔗 Seedream reference_images:', input.referenceImages)
+  
   const body: Record<string, unknown> = {
     prompt: input.prompt,
     reference_images: input.referenceImages,
@@ -280,6 +297,8 @@ export async function seedreamEdit(
   if (input.seed !== undefined) {
     body.seed = input.seed
   }
+
+  console.log('📤 Seedream request body:', JSON.stringify(body, null, 2))
 
   return freepikFetch<FreepikTaskResponse>('/text-to-image/seedream-v4-5-edit', {
     method: 'POST',
