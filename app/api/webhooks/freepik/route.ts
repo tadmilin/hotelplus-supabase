@@ -245,6 +245,31 @@ async function handleImprovePromptComplete(
 
     const metadata = job.metadata as JobMetadata
     
+    // Validate reference images
+    if (!metadata.imageUrls || metadata.imageUrls.length === 0) {
+      throw new Error('No reference images found in metadata')
+    }
+
+    if (metadata.imageUrls.length > 14) {
+      throw new Error(`Too many reference images: ${metadata.imageUrls.length} (max 14)`)
+    }
+
+    // Validate image URLs
+    const validUrls = metadata.imageUrls.filter(url => {
+      try {
+        new URL(url)
+        return url.startsWith('http://') || url.startsWith('https://')
+      } catch {
+        return false
+      }
+    })
+
+    if (validUrls.length === 0) {
+      throw new Error('No valid image URLs found')
+    }
+
+    console.log(`✅ Validated ${validUrls.length} reference images`)
+    
     // Append "no text" instructions
     const finalPrompt = appendNoTextInstructions(improvedPrompt)
     
@@ -261,7 +286,7 @@ async function handleImprovePromptComplete(
     // Call Seedream Edit API with webhook
     const result = await seedreamEdit({
       prompt: finalPrompt,
-      referenceImages: metadata.imageUrls,
+      referenceImages: validUrls,
       webhookUrl,
       aspectRatio: metadata.aspectRatio as 'square_1_1' | 'widescreen_16_9' | 'social_story_9_16' | 'portrait_2_3' | 'traditional_3_4' | 'standard_3_2' | 'classic_4_3' | 'cinematic_21_9',
     })

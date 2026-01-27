@@ -65,6 +65,27 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Validate image URLs
+    const validUrls = body.imageUrls.filter(url => {
+      try {
+        new URL(url)
+        return url.startsWith('http://') || url.startsWith('https://')
+      } catch {
+        return false
+      }
+    })
+
+    if (validUrls.length === 0) {
+      return NextResponse.json(
+        { error: 'No valid image URLs provided' },
+        { status: 400 }
+      )
+    }
+
+    if (validUrls.length !== body.imageUrls.length) {
+      console.warn(`⚠️ ${body.imageUrls.length - validUrls.length} invalid URLs filtered out`)
+    }
+
     // Get auth
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -86,7 +107,7 @@ export async function POST(req: NextRequest) {
     // Store generation config in database for webhook to use later
     const generationConfig = {
       customPrompt: body.customPrompt,
-      imageUrls: body.imageUrls,
+      imageUrls: validUrls,
       aspectRatio: body.aspectRatio || 'square_1_1',
       templateUrl: body.templateUrl || null,
       enableImprovePrompt: body.enableImprovePrompt ?? true,
@@ -188,7 +209,7 @@ export async function POST(req: NextRequest) {
       
       const result = await seedreamEdit({
         prompt: finalPrompt,
-        referenceImages: body.imageUrls,
+        referenceImages: validUrls,
         webhookUrl,
         aspectRatio: body.aspectRatio as SeedreamAspectRatio,
       })
