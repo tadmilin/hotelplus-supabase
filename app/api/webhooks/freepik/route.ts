@@ -300,8 +300,8 @@ async function handleImprovePromptComplete(
       throw new Error('No reference images found in metadata')
     }
 
-    if (metadata.imageUrls.length > 14) {
-      throw new Error(`Too many reference images: ${metadata.imageUrls.length} (max 14)`)
+    if (metadata.imageUrls.length > 5) {
+      throw new Error(`Too many reference images: ${metadata.imageUrls.length} (max 5)`)
     }
 
     // Validate image URLs

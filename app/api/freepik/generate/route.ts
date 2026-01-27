@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (body.imageUrls.length > 14) {
+    if (body.imageUrls.length > 5) {
       return NextResponse.json(
-        { error: 'Maximum 14 images allowed for Seedream' },
+        { error: 'Maximum 5 images allowed for Seedream Edit' },
         { status: 400 }
       )
     }

@@ -394,9 +394,9 @@ export default function FreepikPage() {
       if (newMap.has(image.id)) {
         newMap.delete(image.id)
       } else {
-        // Seedream limit: 14 images max
-        if (newMap.size >= 14) {
-          alert('⚠️ Seedream รองรับสูงสุด 14 รูป')
+        // Seedream limit: 5 images max
+        if (newMap.size >= 5) {
+          alert('⚠️ Seedream รองรับสูงสุด 5 รูป')
           return prev
         }
         newMap.set(image.id, image)
@@ -513,7 +513,7 @@ export default function FreepikPage() {
 
   async function handleCreate() {
     if (selectedImagesMap.size === 0) {
-      alert('กรุณาเลือกรูปที่ต้องการแก้ไขอย่างน้อย 1 รูป (สูงสุด 14 รูป)')
+      alert('กรุณาเลือกรูปที่ต้องการแก้ไขอย่างน้อย 1 รูป (สูงสุด 5 รูป)')
       return
     }
 
@@ -688,7 +688,7 @@ export default function FreepikPage() {
                 🎨 Freepik Seedream Edit
               </h1>
               <p className="text-gray-600">
-                แก้ไขรูปด้วย Freepik Seedream 4.5 - เลือกรูปที่ต้องการแก้ไข (1-14 รูป) + เขียน Prompt
+                แก้ไขรูปด้วย Freepik Seedream 4.5 - เลือกรูปที่ต้องการแก้ไข (1-5 รูป) + เขียน Prompt
               </p>
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-semibold">
@@ -957,7 +957,7 @@ export default function FreepikPage() {
                 2️⃣ เลือกรูปที่ต้องการแก้ไข
               </h2>
               <p className="text-sm text-gray-500 mb-4">
-                เลือก 1-14 รูป ที่ต้องการให้ AI แก้ไข
+                เลือก 1-5 รูป ที่ต้องการให้ AI แก้ไข
               </p>
 
               {/* Upload from device */}
@@ -1095,7 +1095,7 @@ export default function FreepikPage() {
                 <div className="mt-4 p-3 bg-teal-50 rounded-lg">
                   <div className="flex justify-between items-center">
                     <p className="text-sm font-semibold text-teal-700">
-                      ✅ เลือกแล้ว {selectedImagesMap.size}/14 รูป
+                      ✅ เลือกแล้ว {selectedImagesMap.size}/5 รูป
                     </p>
                     <button
                       onClick={() => setSelectedImagesMap(new Map())}
@@ -1185,7 +1185,7 @@ export default function FreepikPage() {
             <div className="bg-teal-50 rounded-xl p-4 text-sm text-teal-800">
               <h3 className="font-bold mb-2">📌 วิธีการทำงาน:</h3>
               <ol className="list-decimal list-inside space-y-1">
-                <li>เลือกรูปที่ต้องการแก้ไข (1-14 รูป)</li>
+                <li>เลือกรูปที่ต้องการแก้ไข (1-5 รูป)</li>
                 <li>เขียน Prompt บอกว่าต้องการแก้ไขอย่างไร</li>
                 <li>AI Improve Prompt (ถ้าเปิดใช้)</li>
                 <li>Seedream 4.5 แก้ไขรูป → 4MP Output</li>
