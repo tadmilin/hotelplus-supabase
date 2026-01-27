@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
-import { improvePrompt, mysticGenerate, appendNoTextInstructions } from '@/lib/freepik'
+import { improvePrompt, seedreamEdit, appendNoTextInstructions } from '@/lib/freepik'
 import crypto from 'crypto'
 
 /**
- * Freepik Webhook Handler - Processes 3-step chain
+ * Freepik Webhook Handler - Processes webhook chain for Seedream Edit
  * 
  * Steps:
- * 1. image-to-prompt → receives prompt → triggers improve-prompt
- * 2. improve-prompt → receives improved prompt → triggers mystic
- * 3. mystic → receives image URLs → uploads to Cloudinary → completes job
+ * 1. image-to-prompt → receives style prompt → triggers improve-prompt
+ * 2. improve-prompt → receives improved prompt → triggers seedream-edit
+ * 3. seedream-edit → receives image URLs → uploads to Cloudinary → completes job
  * 
  * Query params:
- * - step: 'image-to-prompt' | 'improve-prompt' | 'mystic'
+ * - step: 'image-to-prompt' | 'improve-prompt' | 'seedream-edit'
  * - jobId: UUID of the job
  */
 
@@ -43,11 +43,10 @@ interface FreepikWebhookPayload {
 // Job metadata stored in database
 interface JobMetadata {
   customPrompt: string
-  model: string
-  resolution: string
+  imageUrls: string[]
   aspectRatio: string
-  useStyleReference: boolean
   templateUrl: string | null
+  enableImprovePrompt: boolean
   templatePrompt?: string // Added after image-to-prompt completes
   improvedPrompt?: string // Added after improve-prompt completes
 }
@@ -77,7 +76,7 @@ function verifyWebhookSignature(
   // Build signed content
   const signedContent = `${webhookId}.${timestamp}.${body}`
 
-  // Handle Svix secret format
+  // Handle Svix secret format (whsec_ prefix means base64)
   const secretKey = secret.startsWith('whsec_')
     ? Buffer.from(secret.substring(6), 'base64')
     : Buffer.from(secret)
@@ -88,7 +87,7 @@ function verifyWebhookSignature(
     .update(signedContent, 'utf8')
     .digest('base64')
 
-  // Signature header format: "v1,<base64>"
+  // Signature header format: "v1,<base64> v2,<base64>"
   const signatures = signature.split(' ')
   for (const sig of signatures) {
     const [version, value] = sig.split(',')
@@ -137,12 +136,12 @@ async function exportJobToSheets(jobId: string) {
         jobId: job.id,
         userName: job.user_name || '',
         userEmail: job.user_email || '',
-        jobType: job.job_type || 'freepik',
+        jobType: job.job_type || 'freepik-seedream',
         status: job.status || '',
         prompt: job.prompt || '',
         templateType: job.template_type || '',
         outputSize: job.output_size || '',
-        inputCount: 1,
+        inputCount: (job.image_urls || []).length,
         outputCount: (job.output_urls || []).length,
         createdAt: createdAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
         completedAt: completedAt ? completedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }) : '',
@@ -172,7 +171,6 @@ async function handleImageToPromptComplete(
   console.log('🔍 Image to Prompt completed, triggering Improve Prompt...')
   
   try {
-    // Get job and metadata
     const { data: job, error: jobError } = await supabaseAdmin
       .from('jobs')
       .select('*')
@@ -185,8 +183,8 @@ async function handleImageToPromptComplete(
 
     const metadata = job.metadata as JobMetadata
     
-    // Combine template prompt with custom prompt
-    const combinedPrompt = `${templatePrompt}, ${metadata.customPrompt}`
+    // Combine template prompt (style) with custom prompt (what to do)
+    const combinedPrompt = `${metadata.customPrompt}. Style reference: ${templatePrompt}`
     
     // Update metadata with template prompt
     const updatedMetadata: JobMetadata = {
@@ -204,7 +202,6 @@ async function handleImageToPromptComplete(
 
     console.log('✅ Improve Prompt task created:', taskId)
 
-    // Update job
     await supabaseAdmin
       .from('jobs')
       .update({
@@ -227,16 +224,15 @@ async function handleImageToPromptComplete(
 }
 
 /**
- * Handle Step 2: Improve Prompt completed → Trigger Mystic Generate
+ * Handle Step 2: Improve Prompt completed → Trigger Seedream Edit
  */
 async function handleImprovePromptComplete(
   jobId: string,
   improvedPrompt: string
 ): Promise<{ success: boolean; error?: string }> {
-  console.log('✨ Improve Prompt completed, triggering Mystic Generate...')
+  console.log('✨ Improve Prompt completed, triggering Seedream Edit...')
   
   try {
-    // Get job and metadata
     const { data: job, error: jobError } = await supabaseAdmin
       .from('jobs')
       .select('*')
@@ -260,35 +256,28 @@ async function handleImprovePromptComplete(
 
     // Build webhook URL for final step
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-    const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=mystic&jobId=${jobId}`
+    const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=seedream-edit&jobId=${jobId}`
 
-    // Prepare style reference if enabled
-    const styleReference = metadata.useStyleReference && metadata.templateUrl
-      ? metadata.templateUrl
-      : undefined
-
-    // Call Mystic Generate API with webhook
-    const result = await mysticGenerate({
+    // Call Seedream Edit API with webhook
+    const result = await seedreamEdit({
       prompt: finalPrompt,
+      referenceImages: metadata.imageUrls,
       webhookUrl,
-      model: metadata.model as 'realism' | 'mystic' | 'flux_1_1_ultra' | 'ideogram',
-      resolution: metadata.resolution as '1k' | '2k' | '4k',
-      aspectRatio: metadata.aspectRatio as 'square_1_1' | 'classic_4_3' | 'traditional_3_4' | 'widescreen_16_9' | 'social_story_9_16' | 'standard_3_2',
-      styleReference,
+      aspectRatio: metadata.aspectRatio as 'square_1_1' | 'widescreen_16_9' | 'social_story_9_16' | 'portrait_2_3' | 'traditional_3_4' | 'standard_3_2' | 'classic_4_3' | 'cinematic_21_9',
     })
 
     const taskId = result.data.task_id
 
-    console.log('✅ Mystic task created:', taskId)
+    console.log('✅ Seedream Edit task created:', taskId)
 
     // Update job with final prompt
     await supabaseAdmin
       .from('jobs')
       .update({
         freepik_task_id: taskId,
-        freepik_status: 'MYSTIC_GENERATING',
-        freepik_step: 'mystic',
-        prompt: finalPrompt, // Store final prompt
+        freepik_status: 'SEEDREAM_GENERATING',
+        freepik_step: 'seedream-edit',
+        prompt: finalPrompt,
         metadata: updatedMetadata,
         updated_at: new Date().toISOString(),
       })
@@ -296,7 +285,7 @@ async function handleImprovePromptComplete(
 
     return { success: true }
   } catch (error) {
-    console.error('❌ Failed to trigger Mystic Generate:', error)
+    console.error('❌ Failed to trigger Seedream Edit:', error)
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -305,14 +294,14 @@ async function handleImprovePromptComplete(
 }
 
 /**
- * Handle Step 3: Mystic completed → Upload to Cloudinary & Complete
+ * Handle Step 3: Seedream Edit completed → Upload to Cloudinary & Complete
  */
-async function handleMysticComplete(
+async function handleSeedreamComplete(
   jobId: string,
   imageUrls: string[],
   hasNsfw: boolean[]
 ): Promise<{ success: boolean; error?: string; outputCount?: number }> {
-  console.log('🎨 Mystic completed, uploading to Cloudinary...')
+  console.log('🎨 Seedream Edit completed, uploading to Cloudinary...')
   
   try {
     // Check for NSFW content
@@ -342,7 +331,7 @@ async function handleMysticComplete(
         
         const cloudinaryUrl = await uploadToCloudinaryFullSize(
           imageUrl,
-          `freepik/${jobId}/output_${i + 1}`
+          `freepik-seedream/${jobId}/output_${i + 1}`
         )
         
         uploadedUrls.push(cloudinaryUrl)
@@ -390,7 +379,7 @@ async function handleMysticComplete(
 
     return { success: true, outputCount: uploadedUrls.length }
   } catch (error) {
-    console.error('❌ Failed to complete Mystic job:', error)
+    console.error('❌ Failed to complete Seedream job:', error)
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -404,7 +393,7 @@ export async function POST(req: NextRequest) {
   try {
     // Get step and jobId from query params
     const { searchParams } = new URL(req.url)
-    const step = searchParams.get('step') || 'mystic' // Default to mystic for backward compatibility
+    const step = searchParams.get('step') || 'seedream-edit'
     const jobIdFromQuery = searchParams.get('jobId')
 
     const webhookSecret = process.env.FREEPIK_WEBHOOK_SECRET
@@ -439,7 +428,6 @@ export async function POST(req: NextRequest) {
     let jobId = jobIdFromQuery
     
     if (!jobId) {
-      // Fallback: find by task_id
       const { data: jobs } = await supabaseAdmin
         .from('jobs')
         .select('id')
@@ -515,10 +503,10 @@ export async function POST(req: NextRequest) {
         result = await handleImprovePromptComplete(jobId, improvedPrompt)
         break
 
-      case 'mystic':
+      case 'seedream-edit':
       default:
         // Step 3 complete → Upload & Finish
-        result = await handleMysticComplete(
+        result = await handleSeedreamComplete(
           jobId,
           webhook.generated,
           webhook.has_nsfw || []
@@ -529,7 +517,6 @@ export async function POST(req: NextRequest) {
     const processingTime = Math.round((Date.now() - startTime) / 1000)
 
     if (!result.success) {
-      // Mark job as failed if chain step failed
       await supabaseAdmin
         .from('jobs')
         .update({
@@ -550,9 +537,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       received: true,
-      status: step === 'mystic' ? 'completed' : 'chain_continued',
+      status: step === 'seedream-edit' ? 'completed' : 'chain_continued',
       step,
-      nextStep: step === 'image-to-prompt' ? 'improve-prompt' : step === 'improve-prompt' ? 'mystic' : null,
+      nextStep: step === 'image-to-prompt' ? 'improve-prompt' : step === 'improve-prompt' ? 'seedream-edit' : null,
       outputCount: result.outputCount,
       processingTime,
     })
@@ -570,7 +557,7 @@ export async function POST(req: NextRequest) {
 // Handle GET for webhook verification
 export async function GET() {
   return NextResponse.json({ 
-    status: 'Freepik webhook endpoint ready',
-    supportedSteps: ['image-to-prompt', 'improve-prompt', 'mystic'],
+    status: 'Freepik Seedream webhook endpoint ready',
+    supportedSteps: ['image-to-prompt', 'improve-prompt', 'seedream-edit'],
   })
 }

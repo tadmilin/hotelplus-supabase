@@ -3,18 +3,16 @@ import { createClient } from '@/lib/supabase/server'
 import { 
   imageToPrompt, 
   improvePrompt,
-  type FreepikMysticModel,
-  type FreepikResolution,
-  type FreepikAspectRatio
+  type SeedreamAspectRatio
 } from '@/lib/freepik'
 
 /**
- * Freepik Generate API - Uses webhook chain instead of polling
+ * Freepik Generate API - Seedream 4.5 Edit with webhook chain
  * 
  * Flow:
- * 1. If template → Image to Prompt API with webhook
- * 2. Webhook → Improve Prompt API with webhook
- * 3. Webhook → Mystic Generate API with webhook
+ * 1. If template → Image to Prompt API with webhook (optional)
+ * 2. Improve Prompt API with webhook (if enabled)
+ * 3. Seedream 4.5 Edit API with webhook
  * 4. Webhook → Upload to Cloudinary & complete
  * 
  * This avoids Vercel 60s timeout completely!
@@ -22,12 +20,11 @@ import {
 
 interface GenerateRequestBody {
   jobId: string
-  templateUrl?: string // Template image for style reference
-  customPrompt: string // User's custom prompt (edits)
-  model?: FreepikMysticModel
-  resolution?: FreepikResolution
-  aspectRatio?: FreepikAspectRatio
-  useStyleReference?: boolean // Use template as style_reference
+  imageUrls: string[] // Input images to edit (1-14)
+  templateUrl?: string | null // Template for Image to Prompt (optional)
+  customPrompt: string
+  aspectRatio?: SeedreamAspectRatio
+  enableImprovePrompt?: boolean
 }
 
 export async function POST(req: NextRequest) {
@@ -37,18 +34,33 @@ export async function POST(req: NextRequest) {
     const body: GenerateRequestBody = await req.json()
     jobId = body.jobId
 
-    console.log('📥 Freepik Generate Request:', {
+    console.log('📥 Freepik Seedream Generate Request:', {
       jobId,
+      imageCount: body.imageUrls?.length || 0,
       hasTemplate: !!body.templateUrl,
       customPrompt: body.customPrompt?.substring(0, 50) + '...',
-      model: body.model,
-      resolution: body.resolution,
+      aspectRatio: body.aspectRatio,
+      enableImprovePrompt: body.enableImprovePrompt,
     })
 
     // Validation
     if (!jobId || !body.customPrompt) {
       return NextResponse.json(
         { error: 'Missing required fields: jobId and customPrompt' },
+        { status: 400 }
+      )
+    }
+
+    if (!body.imageUrls || body.imageUrls.length === 0) {
+      return NextResponse.json(
+        { error: 'At least 1 image is required' },
+        { status: 400 }
+      )
+    }
+
+    if (body.imageUrls.length > 14) {
+      return NextResponse.json(
+        { error: 'Maximum 14 images allowed for Seedream' },
         { status: 400 }
       )
     }
@@ -61,7 +73,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Build webhook URL with step parameter
+    // Build webhook URL
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
     if (!siteUrl) {
       console.error('❌ NEXT_PUBLIC_SITE_URL not configured')
@@ -74,11 +86,20 @@ export async function POST(req: NextRequest) {
     // Store generation config in database for webhook to use later
     const generationConfig = {
       customPrompt: body.customPrompt,
-      model: body.model || 'mystic',
-      resolution: body.resolution || '2k',
+      imageUrls: body.imageUrls,
       aspectRatio: body.aspectRatio || 'square_1_1',
-      useStyleReference: body.useStyleReference ?? true,
       templateUrl: body.templateUrl || null,
+      enableImprovePrompt: body.enableImprovePrompt ?? true,
+    }
+
+    // Determine starting step based on config
+    let startingStep: string
+    if (body.templateUrl) {
+      startingStep = 'image-to-prompt'
+    } else if (body.enableImprovePrompt !== false) {
+      startingStep = 'improve-prompt'
+    } else {
+      startingStep = 'seedream-edit'
     }
 
     // Update job with config and initial status
@@ -86,7 +107,7 @@ export async function POST(req: NextRequest) {
       .from('jobs')
       .update({
         freepik_status: 'STARTING',
-        freepik_step: body.templateUrl ? 'image-to-prompt' : 'improve-prompt',
+        freepik_step: startingStep,
         metadata: generationConfig,
         updated_at: new Date().toISOString(),
       })
@@ -97,9 +118,9 @@ export async function POST(req: NextRequest) {
       throw new Error('Failed to update job')
     }
 
-    // Determine starting point based on whether template is provided
+    // Start appropriate step
     if (body.templateUrl) {
-      // Step 1: Start with Image to Prompt (with webhook)
+      // Step 1: Image to Prompt (get style from template)
       console.log('🔍 Step 1: Image to Prompt with webhook...')
       
       const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=image-to-prompt&jobId=${jobId}`
@@ -109,7 +130,6 @@ export async function POST(req: NextRequest) {
       
       console.log('✅ Image to Prompt task created:', taskId)
       
-      // Update job with task ID
       await supabase
         .from('jobs')
         .update({
@@ -127,9 +147,9 @@ export async function POST(req: NextRequest) {
         message: 'Image to Prompt started. Webhook chain will process remaining steps.',
       })
       
-    } else {
-      // No template: Start directly with Improve Prompt
-      console.log('✨ Step 1 (no template): Improve Prompt with webhook...')
+    } else if (body.enableImprovePrompt !== false) {
+      // Step 2: Improve Prompt directly (no template)
+      console.log('✨ Step 1: Improve Prompt with webhook...')
       
       const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=improve-prompt&jobId=${jobId}`
       
@@ -138,7 +158,6 @@ export async function POST(req: NextRequest) {
       
       console.log('✅ Improve Prompt task created:', taskId)
       
-      // Update job with task ID
       await supabase
         .from('jobs')
         .update({
@@ -155,6 +174,46 @@ export async function POST(req: NextRequest) {
         taskId,
         jobId,
         message: 'Improve Prompt started. Webhook chain will process remaining steps.',
+      })
+      
+    } else {
+      // Step 3: Seedream directly (no template, no improve)
+      console.log('🎨 Step 1: Seedream Edit directly with webhook...')
+      
+      // Import seedreamEdit here to avoid circular dependency
+      const { seedreamEdit, appendNoTextInstructions } = await import('@/lib/freepik')
+      
+      const webhookUrl = `${siteUrl}/api/webhooks/freepik?step=seedream-edit&jobId=${jobId}`
+      const finalPrompt = appendNoTextInstructions(body.customPrompt)
+      
+      const result = await seedreamEdit({
+        prompt: finalPrompt,
+        referenceImages: body.imageUrls,
+        webhookUrl,
+        aspectRatio: body.aspectRatio as SeedreamAspectRatio,
+      })
+      
+      const taskId = result.data.task_id
+      
+      console.log('✅ Seedream task created:', taskId)
+      
+      await supabase
+        .from('jobs')
+        .update({
+          freepik_task_id: taskId,
+          freepik_status: 'SEEDREAM_GENERATING',
+          freepik_step: 'seedream-edit',
+          prompt: finalPrompt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', jobId)
+
+      return NextResponse.json({
+        success: true,
+        step: 'seedream-edit',
+        taskId,
+        jobId,
+        message: 'Seedream Edit started. Webhook will complete the job.',
       })
     }
 

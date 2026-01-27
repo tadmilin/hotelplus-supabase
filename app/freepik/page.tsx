@@ -15,9 +15,7 @@ interface DriveImage {
   url: string
 }
 
-type FreepikModel = 'realism' | 'flux_1_1_ultra' | 'mystic' | 'ideogram'
-type FreepikResolution = '1k' | '2k' | '4k'
-type FreepikAspectRatio = 'square_1_1' | 'classic_4_3' | 'traditional_3_4' | 'widescreen_16_9' | 'social_story_9_16' | 'standard_3_2'
+type SeedreamAspectRatio = 'square_1_1' | 'widescreen_16_9' | 'social_story_9_16' | 'portrait_2_3' | 'traditional_3_4' | 'standard_3_2' | 'classic_4_3' | 'cinematic_21_9'
 
 export default function FreepikPage() {
   const router = useRouter()
@@ -25,6 +23,17 @@ export default function FreepikPage() {
   
   const [user, setUser] = useState<User | null>(null)
   const [driveFolders, setDriveFolders] = useState<Array<{ driveId: string; driveName: string; folders: TreeFolder[] }>>([])
+  const [selectedFolderId, setSelectedFolderId] = useState('')
+  const [driveImages, setDriveImages] = useState<DriveImage[]>([])
+  const [displayedImages, setDisplayedImages] = useState<DriveImage[]>([])
+  const [selectedImagesMap, setSelectedImagesMap] = useState<Map<string, DriveImage>>(new Map())
+  const [imageCounts, setImageCounts] = useState<Record<string, number>>({})
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [aspectRatio, setAspectRatio] = useState<SeedreamAspectRatio>('square_1_1')
+  const [creating, setCreating] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('')
+  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [excludedFolderIds, setExcludedFolderIds] = useState<Set<string>>(new Set())
   
   // Drive management
@@ -33,29 +42,23 @@ export default function FreepikPage() {
   const [selectedDriveIds, setSelectedDriveIds] = useState<Set<string>>(new Set())
   const [savingDrives, setSavingDrives] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  const [isLoadingFolders, setIsLoadingFolders] = useState(false)
   const [loadingTimer, setLoadingTimer] = useState(0)
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false)
   
-  // Template/Reference image state
+  // Template state (optional - for Image to Prompt)
+  const [enableTemplate, setEnableTemplate] = useState(false)
   const [templateFolderId, setTemplateFolderId] = useState('')
   const [templateImages, setTemplateImages] = useState<DriveImage[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
-  const [loadingTemplates, setLoadingTemplates] = useState(false)
   const [templateSearch, setTemplateSearch] = useState('')
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
   
-  // Prompt state
-  const [customPrompt, setCustomPrompt] = useState('')
+  // Improve Prompt toggle
+  const [enableImprovePrompt, setEnableImprovePrompt] = useState(true)
   
-  // Freepik options
-  const [model, setModel] = useState<FreepikModel>('mystic')
-  const [resolution, setResolution] = useState<FreepikResolution>('2k')
-  const [aspectRatio, setAspectRatio] = useState<FreepikAspectRatio>('square_1_1')
-  const [useStyleReference, setUseStyleReference] = useState(true)
-  
-  // UI state
-  const [creating, setCreating] = useState(false)
-  const [status, setStatus] = useState('')
+  // Search state
+  const [folderSearch, setFolderSearch] = useState('')
 
   useEffect(() => {
     async function checkAuth() {
@@ -245,9 +248,166 @@ export default function FreepikPage() {
     }
   }
 
+  async function loadDriveImages() {
+    if (!selectedFolderId) {
+      alert('กรุณาเลือกโฟลเดอร์ก่อน')
+      return
+    }
+
+    setLoading(true)
+    setStatus('🔄 กำลังโหลดรูปจาก Google Drive...')
+
+    try {
+      const res = await fetch('/api/drive/list-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: selectedFolderId }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setDriveImages(data.images || [])
+        setDisplayedImages((data.images || []).slice(0, 100))
+        
+        setImageCounts(prev => ({
+          ...prev,
+          [selectedFolderId]: data.images.length
+        }))
+        
+        setStatus(`✅ โหลด ${data.images.length} รูป${data.cached ? ' (จาก cache)' : ''}`)
+        setTimeout(() => setStatus(''), 3000)
+      } else {
+        alert('Failed to load images')
+        setStatus('')
+      }
+    } catch (error) {
+      console.error('Error fetching images:', error)
+      alert('Error loading images')
+      setStatus('')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleFileUpload(files: FileList | null) {
+    if (!files || files.length === 0) return
+
+    setUploadingFiles(true)
+    const uploadedImages: DriveImage[] = []
+
+    try {
+      const VERCEL_LIMIT_MB = 4
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2)
+        setStatus(`📤 กำลังอัพโหลด ${i + 1}/${files.length}: ${file.name} (${fileSizeMB}MB)...`)
+
+        let fileToUpload: File | Blob = file
+        const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
+                       file.name.toLowerCase().endsWith('.heic') || 
+                       file.name.toLowerCase().endsWith('.heif')
+        
+        if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
+          setStatus(`🗜️ กำลังบีบอัด ${file.name} (${fileSizeMB}MB → <4MB)...`)
+          
+          try {
+            const options = {
+              maxSizeMB: VERCEL_LIMIT_MB,
+              maxWidthOrHeight: 3840,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+              initialQuality: 0.9,
+            }
+            fileToUpload = await imageCompression(file, options)
+          } catch {
+            try {
+              const fallbackOptions = {
+                maxSizeMB: VERCEL_LIMIT_MB,
+                maxWidthOrHeight: 2560,
+                useWebWorker: true,
+                fileType: 'image/jpeg' as const,
+                initialQuality: 0.7,
+              }
+              fileToUpload = await imageCompression(file, fallbackOptions)
+            } catch {
+              alert(`❌ ไม่สามารถบีบอัด ${file.name} ได้`)
+              continue
+            }
+          }
+        } else if (isHEIC) {
+          setStatus(`📱 กำลังแปลงไฟล์ iPhone ${file.name}...`)
+          try {
+            const options = {
+              maxSizeMB: VERCEL_LIMIT_MB,
+              maxWidthOrHeight: 3840,
+              useWebWorker: true,
+              fileType: 'image/jpeg' as const,
+            }
+            fileToUpload = await imageCompression(file, options)
+          } catch {
+            // ส่งไป server ให้ handle
+          }
+        }
+
+        const formData = new FormData()
+        formData.append('files', fileToUpload)
+
+        const res = await fetch('/api/upload-images', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (res.ok) {
+          const data = await res.json()
+          uploadedImages.push(...data.images)
+        } else {
+          console.error(`Failed to upload ${file.name}`)
+          alert(`ไม่สามารถอัพโหลด ${file.name} ได้`)
+        }
+      }
+
+      if (uploadedImages.length > 0) {
+        setSelectedImagesMap(prev => {
+          const newMap = new Map(prev)
+          uploadedImages.forEach(img => {
+            newMap.set(img.id, img)
+          })
+          return newMap
+        })
+
+        setStatus(`✅ อัพโหลดสำเร็จ ${uploadedImages.length} รูป`)
+        setTimeout(() => setStatus(''), 3000)
+      }
+    } catch (error) {
+      console.error('Upload error:', error)
+      alert('เกิดข้อผิดพลาดในการอัพโหลด')
+      setStatus('')
+    } finally {
+      setUploadingFiles(false)
+    }
+  }
+
+  function toggleImageSelection(image: DriveImage) {
+    setSelectedImagesMap(prev => {
+      const newMap = new Map(prev)
+      if (newMap.has(image.id)) {
+        newMap.delete(image.id)
+      } else {
+        // Seedream limit: 14 images max
+        if (newMap.size >= 14) {
+          alert('⚠️ Seedream รองรับสูงสุด 14 รูป')
+          return prev
+        }
+        newMap.set(image.id, image)
+      }
+      return newMap
+    })
+  }
+
   async function loadTemplateImages() {
     if (!templateFolderId) {
-      alert('กรุณาเลือกโฟลเดอร์ก่อน')
+      alert('กรุณาเลือกโฟลเดอร์ Template ก่อน')
       return
     }
 
@@ -262,35 +422,30 @@ export default function FreepikPage() {
       if (res.ok) {
         const data = await res.json()
         setTemplateImages(data.images || [])
-        setStatus(`✅ โหลด ${data.images?.length || 0} รูป`)
-        setTimeout(() => setStatus(''), 3000)
       } else {
-        alert('ไม่สามารถโหลดรูปได้')
+        alert('ไม่สามารถโหลด Template ได้')
       }
     } catch (error) {
-      console.error('Load images error:', error)
-      alert('เกิดข้อผิดพลาด')
+      console.error('Load template error:', error)
+      alert('เกิดข้อผิดพลาดในการโหลด Template')
     } finally {
       setLoadingTemplates(false)
     }
   }
 
-  // 📤 Upload from device
   async function handleTemplateUpload(files: FileList | null) {
     if (!files || files.length === 0) return
 
     setUploadingTemplate(true)
-    setStatus('📤 กำลังอัพโหลดรูป Reference...')
+    setStatus('📤 กำลังอัพโหลดรูป Template...')
 
     try {
       const VERCEL_LIMIT_MB = 4
-      const file = files[0] // Only take first file for template
+      const file = files[0]
       let fileToUpload: File | Blob = file
       
-      // Compress if needed
       if (file.size > VERCEL_LIMIT_MB * 1024 * 1024) {
         setStatus(`🗜️ กำลังบีบอัด ${file.name}...`)
-        
         try {
           const options = {
             maxSizeMB: VERCEL_LIMIT_MB,
@@ -301,7 +456,6 @@ export default function FreepikPage() {
           }
           fileToUpload = await imageCompression(file, options)
         } catch {
-          // Try fallback compression
           const fallbackOptions = {
             maxSizeMB: VERCEL_LIMIT_MB,
             maxWidthOrHeight: 2560,
@@ -313,7 +467,6 @@ export default function FreepikPage() {
         }
       }
 
-      // Handle HEIC files
       const isHEIC = file.type === 'image/heic' || file.type === 'image/heif' || 
                      file.name.toLowerCase().endsWith('.heic') || 
                      file.name.toLowerCase().endsWith('.heif')
@@ -341,11 +494,8 @@ export default function FreepikPage() {
         const data = await res.json()
         if (data.images && data.images.length > 0) {
           const uploadedImage = data.images[0]
-          
-          // Add to template images and select it
           setTemplateImages(prev => [uploadedImage, ...prev])
           setSelectedTemplate(uploadedImage.url)
-          
           setStatus(`✅ อัพโหลดสำเร็จ`)
           setTimeout(() => setStatus(''), 3000)
         }
@@ -361,23 +511,87 @@ export default function FreepikPage() {
     }
   }
 
-  async function handleGenerate() {
+  async function handleCreate() {
+    if (selectedImagesMap.size === 0) {
+      alert('กรุณาเลือกรูปที่ต้องการแก้ไขอย่างน้อย 1 รูป (สูงสุด 14 รูป)')
+      return
+    }
+
     if (!customPrompt.trim()) {
-      alert('กรุณากรอก Prompt (คำอธิบายสิ่งที่ต้องการ)')
+      alert('กรุณากรอก Prompt')
+      return
+    }
+
+    if (enableTemplate && !selectedTemplate) {
+      alert('กรุณาเลือก Template หรือปิด Template mode')
       return
     }
 
     setCreating(true)
-    setStatus('🎨 กำลังเตรียม...')
+    setStatus('กำลังเตรียมรูปภาพ...')
 
     try {
+      const selectedImages = Array.from(selectedImagesMap.values())
       if (!user) throw new Error('User not authenticated')
 
-      // Prepare template URL if selected
-      let templateUrl: string | undefined
+      // Create job first
+      const { data: job, error: jobError } = await supabase
+        .from('jobs')
+        .insert({
+          user_id: user.id,
+          user_name: user.user_metadata?.name || null,
+          user_email: user.email,
+          job_type: 'freepik-seedream',
+          status: 'processing',
+          prompt: customPrompt,
+          output_size: aspectRatio,
+          image_urls: selectedImages.map(img => img.url),
+          template_url: enableTemplate ? selectedTemplate : null,
+          output_urls: [],
+        })
+        .select()
+        .single()
 
-      if (selectedTemplate) {
-        setStatus('📤 กำลังอัพโหลด Reference Image...')
+      if (jobError) throw jobError
+
+      // Upload images to Cloudinary
+      setStatus(`กำลังอัพโหลด ${selectedImages.length} รูป...`)
+      
+      const imageUrls: string[] = []
+      const batchSize = 3
+      
+      for (let i = 0; i < selectedImages.length; i += batchSize) {
+        const batch = selectedImages.slice(i, i + batchSize)
+        
+        const batchPromises = batch.map(async (img) => {
+          if (img.url.includes('cloudinary.com')) {
+            return img.url
+          }
+          
+          if (img.url.includes('drive.google.com') || img.id.length > 20) {
+            const uploadRes = await fetch('/api/drive/download-and-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileId: img.id, fileName: img.name }),
+            })
+            
+            if (!uploadRes.ok) throw new Error('Failed to upload image')
+            const { url } = await uploadRes.json()
+            return url
+          }
+          
+          return img.url
+        })
+        
+        setStatus(`อัพโหลด ${i + 1}-${Math.min(i + batchSize, selectedImages.length)}/${selectedImages.length}...`)
+        const batchResults = await Promise.all(batchPromises)
+        imageUrls.push(...batchResults)
+      }
+
+      // Upload template if enabled
+      let finalTemplateUrl: string | null = null
+      if (enableTemplate && selectedTemplate) {
+        setStatus('กำลังอัพโหลด Template...')
         
         const templateImage = templateImages.find(img => img.url === selectedTemplate)
         
@@ -385,7 +599,7 @@ export default function FreepikPage() {
           const isCloudinaryUrl = selectedTemplate.includes('cloudinary.com')
           
           if (isCloudinaryUrl) {
-            templateUrl = selectedTemplate
+            finalTemplateUrl = selectedTemplate
           } else {
             const uploadRes = await fetch('/api/drive/download-and-upload', {
               method: 'POST',
@@ -395,35 +609,19 @@ export default function FreepikPage() {
             
             if (uploadRes.ok) {
               const { url } = await uploadRes.json()
-              templateUrl = url
+              finalTemplateUrl = url
             } else {
-              throw new Error('Reference image upload failed')
+              throw new Error('Template upload failed')
             }
           }
         }
       }
 
-      // Create job in database
-      setStatus('📝 กำลังสร้าง Job...')
-      
-      const { data: job, error: jobError } = await supabase
-        .from('jobs')
-        .insert({
-          user_id: user.id,
-          user_name: user.user_metadata?.name || null,
-          user_email: user.email,
-          job_type: 'freepik',
-          status: 'processing',
-          prompt: customPrompt,
-          template_url: templateUrl || null,
-          output_size: `${resolution}_${aspectRatio}`,
-          image_urls: templateUrl ? [templateUrl] : [],
-          output_urls: [],
-        })
-        .select()
-        .single()
-
-      if (jobError) throw jobError
+      // Update job with Cloudinary URLs
+      await supabase.from('jobs').update({
+        image_urls: imageUrls,
+        template_url: finalTemplateUrl,
+      }).eq('id', job.id)
 
       // Call Freepik API
       setStatus('🎨 กำลังส่งไป Freepik AI...')
@@ -433,12 +631,11 @@ export default function FreepikPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId: job.id,
-          templateUrl: templateUrl || null,
+          imageUrls: imageUrls,
+          templateUrl: finalTemplateUrl,
           customPrompt: customPrompt,
-          model: model,
-          resolution: resolution,
           aspectRatio: aspectRatio,
-          useStyleReference: useStyleReference && !!templateUrl,
+          enableImprovePrompt: enableImprovePrompt,
         }),
       })
 
@@ -463,6 +660,12 @@ export default function FreepikPage() {
     }
   }
 
+  function loadMoreImages() {
+    const currentLen = displayedImages.length
+    const nextBatch = driveImages.slice(currentLen, currentLen + 100)
+    setDisplayedImages(prev => [...prev, ...nextBatch])
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-50 flex items-center justify-center">
@@ -476,26 +679,26 @@ export default function FreepikPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-50 py-8">
-      <div className="container mx-auto px-4 max-w-6xl">
+      <div className="container mx-auto px-4 max-w-7xl">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-4xl font-bold text-teal-900 mb-2">
-                🎨 Freepik AI Generate
+                🎨 Freepik Seedream Edit
               </h1>
               <p className="text-gray-600">
-                สร้างรูปด้วย Freepik Mystic AI - เลือก Reference Image (ไม่บังคับ) + เขียน Prompt
+                แก้ไขรูปด้วย Freepik Seedream 4.5 - เลือกรูปที่ต้องการแก้ไข (1-14 รูป) + เขียน Prompt
               </p>
               <div className="mt-2 flex items-center gap-2 flex-wrap">
-                <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-semibold">
-                  ✨ Image to Prompt
-                </span>
                 <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-semibold">
                   ✨ Improve Prompt
                 </span>
                 <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-semibold">
-                  ✨ Mystic 4K
+                  🎨 Seedream 4.5 Edit
+                </span>
+                <span className="bg-teal-100 text-teal-700 text-xs px-2 py-1 rounded-full font-semibold">
+                  📐 4MP Output
                 </span>
               </div>
               {isLoadingFolders && (
@@ -531,7 +734,6 @@ export default function FreepikPage() {
                   <span>{syncing ? '⏳' : '🔄'}</span>
                   <span>{syncing ? 'Syncing...' : 'อัพเดทรายการ'}</span>
                 </button>
-                <p className="text-xs text-gray-500 text-center">💡 กดเมื่อมีโฟลเดอร์ใหม่</p>
               </div>
             </div>
           </div>
@@ -542,7 +744,7 @@ export default function FreepikPage() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-800">⚙️ เลือก Drives ที่ต้องการแสดง</h2>
+                <h2 className="text-xl font-bold text-gray-800">⚙️ เลือก Drives</h2>
                 <button onClick={() => setShowDriveSelector(false)} className="text-gray-500 hover:text-gray-700">
                   ✕
                 </button>
@@ -596,23 +798,173 @@ export default function FreepikPage() {
           </div>
         )}
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Reference Image Selection */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left: Template (Optional) */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-teal-900">
+                  1️⃣ Template (ไม่บังคับ)
+                </h2>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableTemplate}
+                    onChange={(e) => setEnableTemplate(e.target.checked)}
+                    className="w-5 h-5 text-teal-600 rounded"
+                  />
+                  <span className="text-sm font-semibold text-gray-600">เปิดใช้</span>
+                </label>
+              </div>
+
+              {enableTemplate ? (
+                <>
+                  <p className="text-sm text-gray-500 mb-4">
+                    AI จะดึง style จาก Template มาใช้ (Image to Prompt)
+                  </p>
+                  
+                  {/* Upload Template */}
+                  <div className="mb-4">
+                    <label className="block w-full cursor-pointer">
+                      <div className="border-2 border-dashed border-teal-300 rounded-lg p-4 text-center hover:border-teal-500 hover:bg-teal-50 transition-colors">
+                        {uploadingTemplate ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="animate-spin h-5 w-5 border-2 border-teal-600 border-t-transparent rounded-full"></div>
+                            <span className="text-teal-600">กำลังอัพโหลด...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-3xl">📤</span>
+                            <p className="text-teal-600 font-semibold mt-2">อัพโหลด Template</p>
+                          </>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleTemplateUpload(e.target.files)}
+                        className="hidden"
+                        disabled={uploadingTemplate}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="flex-1 h-px bg-gray-200"></div>
+                    <span className="text-gray-400 text-sm">หรือเลือกจาก Drive</span>
+                    <div className="flex-1 h-px bg-gray-200"></div>
+                  </div>
+
+                  {/* Template Search */}
+                  <div className="mb-4">
+                    <input
+                      type="text"
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      placeholder="🔍 ค้นหาโฟลเดอร์..."
+                      className="w-full px-4 py-2 border-2 border-teal-200 rounded-lg focus:border-teal-500 focus:outline-none text-black"
+                    />
+                  </div>
+
+                  {/* Template Folder Tree */}
+                  <div className="max-h-32 overflow-y-auto border-2 border-gray-100 rounded-lg p-2 mb-4">
+                    {driveFolders.length === 0 ? (
+                      <p className="text-gray-400 text-center py-2">ไม่มีโฟลเดอร์</p>
+                    ) : (
+                      driveFolders.map((drive) => {
+                        const filteredFolders = filterFoldersBySearch(drive.folders, templateSearch)
+                        if (templateSearch && filteredFolders.length === 0) return null
+                        
+                        return (
+                          <div key={drive.driveId} className="mb-2">
+                            <h3 className="text-xs font-semibold text-gray-500">
+                              📱 {drive.driveName}
+                            </h3>
+                            <FolderTree
+                              folders={filteredFolders}
+                              onSelectFolder={(id) => {
+                                setTemplateFolderId(id)
+                                setSelectedTemplate('')
+                                setTemplateImages([])
+                              }}
+                              selectedFolderId={templateFolderId}
+                              imageCounts={{}}
+                            />
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {templateFolderId && (
+                    <button
+                      onClick={loadTemplateImages}
+                      disabled={loadingTemplates}
+                      className="w-full bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-4"
+                    >
+                      {loadingTemplates ? '⏳ กำลังโหลด...' : '📂 โหลด Templates'}
+                    </button>
+                  )}
+
+                  {/* Template Grid */}
+                  {templateImages.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                      {templateImages.map((img) => (
+                        <div
+                          key={img.id}
+                          onClick={() => setSelectedTemplate(selectedTemplate === img.url ? '' : img.url)}
+                          className={`relative cursor-pointer rounded-lg overflow-hidden border-3 transition-all ${
+                            selectedTemplate === img.url
+                              ? 'border-teal-500 ring-2 ring-teal-300'
+                              : 'border-transparent hover:border-teal-200'
+                          }`}
+                        >
+                          <Image
+                            src={img.thumbnailUrl || img.url}
+                            alt={img.name}
+                            width={100}
+                            height={100}
+                            className="w-full h-20 object-cover"
+                          />
+                          {selectedTemplate === img.url && (
+                            <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center">
+                              <span className="text-xl">✓</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedTemplate && (
+                    <div className="mt-4 p-2 bg-teal-50 rounded-lg">
+                      <p className="text-sm font-semibold text-teal-700">✅ Template เลือกแล้ว</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-4">
+                  ไม่ใช้ Template - ใช้แค่ Prompt อย่างเดียว
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Middle: Input Images */}
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-xl font-bold text-teal-900 mb-4">
-                1️⃣ เลือก Reference Image (ไม่บังคับ)
+                2️⃣ เลือกรูปที่ต้องการแก้ไข
               </h2>
               <p className="text-sm text-gray-500 mb-4">
-                AI จะวิเคราะห์ style จากรูปนี้และสร้างรูปใหม่ที่มี style คล้ายกัน
+                เลือก 1-14 รูป ที่ต้องการให้ AI แก้ไข
               </p>
-              
+
               {/* Upload from device */}
               <div className="mb-4">
                 <label className="block w-full cursor-pointer">
                   <div className="border-2 border-dashed border-teal-300 rounded-lg p-4 text-center hover:border-teal-500 hover:bg-teal-50 transition-colors">
-                    {uploadingTemplate ? (
+                    {uploadingFiles ? (
                       <div className="flex items-center justify-center gap-2">
                         <div className="animate-spin h-5 w-5 border-2 border-teal-600 border-t-transparent rounded-full"></div>
                         <span className="text-teal-600">กำลังอัพโหลด...</span>
@@ -621,16 +973,17 @@ export default function FreepikPage() {
                       <>
                         <span className="text-3xl">📤</span>
                         <p className="text-teal-600 font-semibold mt-2">อัพโหลดจากเครื่อง</p>
-                        <p className="text-xs text-gray-400 mt-1">รองรับ JPG, PNG, HEIC</p>
+                        <p className="text-xs text-gray-400 mt-1">เลือกหลายรูปได้</p>
                       </>
                     )}
                   </div>
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => handleTemplateUpload(e.target.files)}
+                    multiple
+                    onChange={(e) => handleFileUpload(e.target.files)}
                     className="hidden"
-                    disabled={uploadingTemplate}
+                    disabled={uploadingFiles}
                   />
                 </label>
               </div>
@@ -641,30 +994,29 @@ export default function FreepikPage() {
                 <div className="flex-1 h-px bg-gray-200"></div>
               </div>
 
-              {/* Search */}
+              {/* Folder Search */}
               <div className="mb-4">
                 <input
                   type="text"
-                  value={templateSearch}
-                  onChange={(e) => setTemplateSearch(e.target.value)}
+                  value={folderSearch}
+                  onChange={(e) => setFolderSearch(e.target.value)}
                   placeholder="🔍 ค้นหาโฟลเดอร์..."
                   className="w-full px-4 py-2 border-2 border-teal-200 rounded-lg focus:border-teal-500 focus:outline-none text-black"
                 />
               </div>
 
               {/* Folder Tree */}
-              <div className="max-h-48 overflow-y-auto border-2 border-gray-100 rounded-lg p-2 mb-4">
+              <div className="max-h-40 overflow-y-auto border-2 border-gray-100 rounded-lg p-2 mb-4">
                 {isLoadingFolders ? (
-                  <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center justify-center py-4">
                     <div className="animate-spin h-6 w-6 border-2 border-teal-600 border-t-transparent rounded-full"></div>
-                    <span className="ml-2 text-gray-500">กำลังโหลด...</span>
                   </div>
                 ) : driveFolders.length === 0 ? (
                   <p className="text-gray-400 text-center py-4">ไม่มีโฟลเดอร์</p>
                 ) : (
                   driveFolders.map((drive) => {
-                    const filteredFolders = filterFoldersBySearch(drive.folders, templateSearch)
-                    if (templateSearch && filteredFolders.length === 0) return null
+                    const filteredFolders = filterFoldersBySearch(drive.folders, folderSearch)
+                    if (folderSearch && filteredFolders.length === 0) return null
                     
                     return (
                       <div key={drive.driveId} className="mb-4">
@@ -674,12 +1026,12 @@ export default function FreepikPage() {
                         <FolderTree
                           folders={filteredFolders}
                           onSelectFolder={(id) => {
-                            setTemplateFolderId(id)
-                            setSelectedTemplate('')
-                            setTemplateImages([])
+                            setSelectedFolderId(id)
+                            setDriveImages([])
+                            setDisplayedImages([])
                           }}
-                          selectedFolderId={templateFolderId}
-                          imageCounts={{}}
+                          selectedFolderId={selectedFolderId}
+                          imageCounts={imageCounts}
                         />
                       </div>
                     )
@@ -687,66 +1039,71 @@ export default function FreepikPage() {
                 )}
               </div>
 
-              {/* Load Templates Button */}
-              {templateFolderId && (
+              {selectedFolderId && (
                 <button
-                  onClick={loadTemplateImages}
-                  disabled={loadingTemplates}
+                  onClick={loadDriveImages}
+                  disabled={loading}
                   className="w-full bg-teal-600 hover:bg-teal-700 text-white py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 mb-4"
                 >
-                  {loadingTemplates ? '⏳ กำลังโหลด...' : '📂 โหลดรูปจากโฟลเดอร์'}
+                  {loading ? '⏳ กำลังโหลด...' : '📂 โหลดรูปจากโฟลเดอร์'}
                 </button>
               )}
 
-              {/* Template Grid */}
-              {templateImages.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
-                  {templateImages.map((img) => (
-                    <div
-                      key={img.id}
-                      onClick={() => setSelectedTemplate(selectedTemplate === img.url ? '' : img.url)}
-                      className={`relative cursor-pointer rounded-lg overflow-hidden border-3 transition-all ${
-                        selectedTemplate === img.url
-                          ? 'border-teal-500 ring-2 ring-teal-300'
-                          : 'border-transparent hover:border-teal-200'
-                      }`}
+              {/* Image Grid */}
+              {displayedImages.length > 0 && (
+                <>
+                  <div className="grid grid-cols-4 gap-2 max-h-60 overflow-y-auto">
+                    {displayedImages.map((img) => (
+                      <div
+                        key={img.id}
+                        onClick={() => toggleImageSelection(img)}
+                        className={`relative cursor-pointer rounded-lg overflow-hidden border-3 transition-all ${
+                          selectedImagesMap.has(img.id)
+                            ? 'border-teal-500 ring-2 ring-teal-300'
+                            : 'border-transparent hover:border-teal-200'
+                        }`}
+                      >
+                        <Image
+                          src={img.thumbnailUrl || img.url}
+                          alt={img.name}
+                          width={80}
+                          height={80}
+                          className="w-full h-16 object-cover"
+                        />
+                        {selectedImagesMap.has(img.id) && (
+                          <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center">
+                            <span className="text-lg">✓</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {displayedImages.length < driveImages.length && (
+                    <button
+                      onClick={loadMoreImages}
+                      className="w-full mt-2 py-2 text-teal-600 hover:bg-teal-50 rounded-lg font-semibold"
                     >
-                      <Image
-                        src={img.thumbnailUrl || img.url}
-                        alt={img.name}
-                        width={100}
-                        height={100}
-                        className="w-full h-24 object-cover"
-                      />
-                      {selectedTemplate === img.url && (
-                        <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center">
-                          <span className="text-2xl">✓</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                      โหลดเพิ่ม ({driveImages.length - displayedImages.length} รูป)
+                    </button>
+                  )}
+                </>
               )}
 
-              {/* Selected Template Preview */}
-              {selectedTemplate && (
+              {/* Selected Count */}
+              {selectedImagesMap.size > 0 && (
                 <div className="mt-4 p-3 bg-teal-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold text-teal-700">✅ Reference Image เลือกแล้ว</p>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm font-semibold text-teal-700">
+                      ✅ เลือกแล้ว {selectedImagesMap.size}/14 รูป
+                    </p>
                     <button
-                      onClick={() => setSelectedTemplate('')}
-                      className="text-red-500 hover:text-red-700 text-sm"
+                      onClick={() => setSelectedImagesMap(new Map())}
+                      className="text-red-500 text-sm hover:underline"
                     >
-                      ✕ ยกเลิก
+                      ล้างทั้งหมด
                     </button>
                   </div>
-                  <Image
-                    src={selectedTemplate}
-                    alt="Selected reference"
-                    width={200}
-                    height={150}
-                    className="w-full max-h-40 object-contain rounded"
-                  />
                 </div>
               )}
             </div>
@@ -754,119 +1111,73 @@ export default function FreepikPage() {
 
           {/* Right: Prompt & Options */}
           <div className="space-y-6">
-            {/* Prompt */}
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-xl font-bold text-teal-900 mb-4">
-                2️⃣ เขียน Prompt
+                3️⃣ เขียน Prompt
               </h2>
-              <p className="text-sm text-gray-500 mb-4">
-                บอกว่าต้องการสร้างรูปแบบไหน - AI จะ Improve Prompt ให้อัตโนมัติ
-              </p>
               
               <textarea
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="เช่น: ภาพโรงแรมริมทะเลยามพระอาทิตย์ตก, สระว่ายน้ำสีฟ้าใส, บรรยากาศสุดหรู..."
+                placeholder="บอกว่าต้องการแก้ไขรูปอย่างไร เช่น: เปลี่ยนฟ้าเป็นพระอาทิตย์ตก, เพิ่มสระว่ายน้ำ, ทำให้ดูหรูหราขึ้น..."
                 className="w-full h-32 px-4 py-3 border-2 border-teal-200 rounded-lg focus:border-teal-500 focus:outline-none resize-none text-black"
               />
 
-              <p className="text-xs text-gray-400 mt-2">
-                💡 ระบบจะเพิ่ม &quot;NO TEXT, NO LOGO&quot; อัตโนมัติ
-              </p>
-            </div>
-
-            {/* Options */}
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-xl font-bold text-teal-900 mb-4">
-                3️⃣ ตั้งค่า
-              </h2>
-
-              {/* Model */}
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  🎨 Model
+              {/* Improve Prompt Toggle */}
+              <div className="mt-4 mb-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableImprovePrompt}
+                    onChange={(e) => setEnableImprovePrompt(e.target.checked)}
+                    className="w-5 h-5 text-teal-600 rounded"
+                  />
+                  <div>
+                    <span className="text-sm font-semibold text-gray-700">
+                      ✨ Improve Prompt
+                    </span>
+                    <p className="text-xs text-gray-400">
+                      AI ช่วยขยาย prompt ให้ละเอียดขึ้น
+                    </p>
+                  </div>
                 </label>
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value as FreepikModel)}
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-teal-500 focus:outline-none text-black"
-                >
-                  <option value="mystic">Mystic - คุณภาพสูง (แนะนำ)</option>
-                  <option value="flux_1_1_ultra">Flux 1.1 Ultra - เร็ว, หลากหลาย</option>
-                  <option value="realism">Realism - ภาพสมจริง</option>
-                  <option value="ideogram">Ideogram - สร้างสรรค์</option>
-                </select>
-              </div>
-
-              {/* Resolution */}
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  📐 Resolution
-                </label>
-                <select
-                  value={resolution}
-                  onChange={(e) => setResolution(e.target.value as FreepikResolution)}
-                  className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-teal-500 focus:outline-none text-black"
-                >
-                  <option value="1k">1K - เร็ว</option>
-                  <option value="2k">2K - สมดุล (แนะนำ)</option>
-                  <option value="4k">4K - คุณภาพสูงสุด</option>
-                </select>
               </div>
 
               {/* Aspect Ratio */}
               <div className="mb-4">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  📏 Aspect Ratio
+                  📐 Aspect Ratio
                 </label>
                 <select
                   value={aspectRatio}
-                  onChange={(e) => setAspectRatio(e.target.value as FreepikAspectRatio)}
+                  onChange={(e) => setAspectRatio(e.target.value as SeedreamAspectRatio)}
                   className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-teal-500 focus:outline-none text-black"
                 >
-                  <option value="square_1_1">1:1 - สี่เหลี่ยมจตุรัส</option>
-                  <option value="classic_4_3">4:3 - คลาสสิก</option>
-                  <option value="traditional_3_4">3:4 - แนวตั้ง</option>
-                  <option value="widescreen_16_9">16:9 - จอกว้าง</option>
-                  <option value="social_story_9_16">9:16 - Story/TikTok</option>
-                  <option value="standard_3_2">3:2 - มาตรฐาน</option>
+                  <option value="square_1_1">1:1 - สี่เหลี่ยมจตุรัส (2048x2048)</option>
+                  <option value="widescreen_16_9">16:9 - จอกว้าง (2730x1536)</option>
+                  <option value="social_story_9_16">9:16 - Story/TikTok (1536x2730)</option>
+                  <option value="classic_4_3">4:3 - คลาสสิก (2364x1774)</option>
+                  <option value="traditional_3_4">3:4 - แนวตั้ง (1774x2364)</option>
+                  <option value="standard_3_2">3:2 - Photo Print (2508x1672)</option>
+                  <option value="portrait_2_3">2:3 - Pinterest (1672x2508)</option>
+                  <option value="cinematic_21_9">21:9 - Cinematic (3062x1312)</option>
                 </select>
               </div>
-
-              {/* Style Reference Toggle */}
-              {selectedTemplate && (
-                <div className="mb-4">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useStyleReference}
-                      onChange={(e) => setUseStyleReference(e.target.checked)}
-                      className="w-5 h-5 text-teal-600 rounded"
-                    />
-                    <span className="text-sm font-semibold text-gray-700">
-                      ใช้ Reference เป็น Style Reference
-                    </span>
-                  </label>
-                  <p className="text-xs text-gray-400 mt-1 ml-8">
-                    AI จะพยายามสร้างรูปที่มี style คล้าย reference
-                  </p>
-                </div>
-              )}
             </div>
 
             {/* Generate Button */}
             <button
-              onClick={handleGenerate}
-              disabled={creating || !customPrompt.trim()}
+              onClick={handleCreate}
+              disabled={creating || selectedImagesMap.size === 0 || !customPrompt.trim()}
               className="w-full bg-gradient-to-r from-teal-600 to-green-600 hover:from-teal-700 hover:to-green-700 text-white py-4 rounded-xl font-bold text-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
             >
               {creating ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
-                  กำลังสร้าง...
+                  กำลังส่งงาน...
                 </span>
               ) : (
-                <span>✨ Generate with Freepik AI</span>
+                <span>✨ Generate with Seedream ({selectedImagesMap.size} รูป)</span>
               )}
             </button>
 
@@ -874,13 +1185,13 @@ export default function FreepikPage() {
             <div className="bg-teal-50 rounded-xl p-4 text-sm text-teal-800">
               <h3 className="font-bold mb-2">📌 วิธีการทำงาน:</h3>
               <ol className="list-decimal list-inside space-y-1">
-                <li>ถ้าเลือก Reference → AI จะวิเคราะห์ style (Image to Prompt)</li>
-                <li>AI จะขยาย prompt ให้ละเอียด (Improve Prompt)</li>
-                <li>เพิ่ม &quot;NO TEXT, NO LOGO&quot; อัตโนมัติ</li>
-                <li>Mystic AI สร้างรูป</li>
+                <li>เลือกรูปที่ต้องการแก้ไข (1-14 รูป)</li>
+                <li>เขียน Prompt บอกว่าต้องการแก้ไขอย่างไร</li>
+                <li>AI Improve Prompt (ถ้าเปิดใช้)</li>
+                <li>Seedream 4.5 แก้ไขรูป → 4MP Output</li>
               </ol>
               <p className="mt-3 text-xs text-teal-600">
-                ⚠️ ผลลัพธ์จะมี &quot;style คล้าย&quot; reference แต่ layout อาจไม่เหมือน 100%
+                💡 Template ช่วยให้ AI เข้าใจ style ที่ต้องการ (ไม่บังคับ)
               </p>
             </div>
           </div>

@@ -66,9 +66,21 @@ export interface SeedreamEditInput {
   prompt: string
   referenceImages: string[] // URLs or Base64 (max 14)
   webhookUrl?: string
-  aspectRatio?: FreepikAspectRatio
+  aspectRatio?: SeedreamAspectRatio
   seed?: number
+  enableSafetyChecker?: boolean
 }
+
+// Extended aspect ratio for Seedream (includes cinematic)
+export type SeedreamAspectRatio = 
+  | 'square_1_1' 
+  | 'widescreen_16_9' 
+  | 'social_story_9_16'
+  | 'portrait_2_3'
+  | 'traditional_3_4'
+  | 'standard_3_2'
+  | 'classic_4_3'
+  | 'cinematic_21_9'
 
 /**
  * Get API key from environment
@@ -246,6 +258,7 @@ export async function getMysticStatus(
 
 /**
  * Seedream 4.5 Edit - Edit images with reference
+ * Supports 1-14 reference images, 4MP output resolution
  * 
  * @param input - Edit parameters
  * @returns Task response with task_id
@@ -257,6 +270,7 @@ export async function seedreamEdit(
     prompt: input.prompt,
     reference_images: input.referenceImages,
     aspect_ratio: input.aspectRatio || 'square_1_1',
+    enable_safety_checker: input.enableSafetyChecker ?? true,
   }
 
   if (input.webhookUrl) {
