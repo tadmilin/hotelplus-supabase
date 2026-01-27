@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import replicate from '@/lib/replicate'
-import { uploadToCloudinaryFullSize } from '@/lib/cloudinary'
+import { uploadToCloudinaryFullSize, uploadAndCropToAspectRatio } from '@/lib/cloudinary'
 import crypto from 'crypto'
 
 // Vercel Pro plan: max 300 seconds (5 minutes)
@@ -280,6 +280,7 @@ export async function POST(req: NextRequest) {
         aspectRatio?: string;
         gptPredictions?: string[];
         totalPredictions?: number;
+        targetAspectRatio?: string; // 🔥 เพิ่มสำหรับ crop
         // completedPredictions ย้ายไปเก็บใน job_predictions table แล้ว
       } | null
       
@@ -290,11 +291,19 @@ export async function POST(req: NextRequest) {
         if (isPartOfBatch) {
           console.log('🔄 GPT Image batch: prediction completed', webhook.id)
           
-          // อัพโหลดรูปไป Cloudinary
+          // 🔥 Check if we need to crop (pipeline mode)
+          const batchTargetRatio = metadata.targetAspectRatio
+          
+          // อัพโหลดรูปไป Cloudinary (พร้อม crop ถ้ามี targetAspectRatio)
           const permanentUrls: string[] = []
           for (const tempUrl of outputUrls) {
             try {
-              const url = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+              let url: string
+              if (batchTargetRatio) {
+                url = await uploadAndCropToAspectRatio(tempUrl, batchTargetRatio, 'replicate-outputs')
+              } else {
+                url = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+              }
               permanentUrls.push(url)
             } catch {
               permanentUrls.push(tempUrl)
@@ -474,7 +483,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // 🔥 Check if we need to crop to target aspect ratio
+      const jobMetadata = job.metadata as { targetAspectRatio?: string; pipeline?: string; step?: number } | null
+      const targetAspectRatio = jobMetadata?.targetAspectRatio
+      
+      if (targetAspectRatio) {
+        console.log(`📐 Target aspect ratio: ${targetAspectRatio} - will crop after upload`)
+      }
+
       // อัพโหลดรูปไป Cloudinary เพื่อเก็บถาวร (Replicate URLs หมดอายุ!)
+      // ถ้ามี targetAspectRatio จะ crop ด้วย
       const permanentUrls: string[] = []
       for (const tempUrl of outputUrls) {
         let uploadedUrl = ''
@@ -483,7 +501,14 @@ export async function POST(req: NextRequest) {
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
             console.log(`📤 Uploading to Cloudinary (attempt ${attempt}/2):`, tempUrl.substring(0, 50) + '...')
-            uploadedUrl = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+            
+            // 🔥 If we have a target aspect ratio, crop during upload
+            if (targetAspectRatio) {
+              uploadedUrl = await uploadAndCropToAspectRatio(tempUrl, targetAspectRatio, 'replicate-outputs')
+            } else {
+              uploadedUrl = await uploadToCloudinaryFullSize(tempUrl, 'replicate-outputs')
+            }
+            
             permanentUrls.push(uploadedUrl)
             console.log('✅ Upload successful')
             break
@@ -537,15 +562,16 @@ export async function POST(req: NextRequest) {
 
       // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, gpt-with-template, etc.)
       const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image', 'gpt-with-template']
-      if (nonUpscaleTypes.includes(job.job_type) && outputUrls.length > 0) {
+      if (nonUpscaleTypes.includes(job.job_type) && permanentUrls.length > 0) {
         console.log('🔍 Starting auto-upscale x2 for job:', job.id)
         
         try {
-          // Upscale all output images
-          const urlsToUpscale = outputUrls
+          // 🔥 Use permanentUrls (Cloudinary URLs that are already cropped if targetAspectRatio was set)
+          // This ensures upscale uses the final cropped image, not the temp URL
+          const urlsToUpscale = permanentUrls
 
           // Create upscale jobs for each output
-          for (const outputUrl of urlsToUpscale) {
+          for (const imageUrl of urlsToUpscale) {
             const { data: upscaleJob } = await supabaseAdmin
               .from('jobs')
               .insert({
@@ -556,8 +582,8 @@ export async function POST(req: NextRequest) {
                 status: 'processing',
                 prompt: `Auto-upscale x2 from job ${job.id}`,
                 output_size: 'x2',
-                image_urls: [outputUrl],
-                input_image_url: outputUrl, // 🔥 เพื่อแสดงรูป before ใน Dashboard
+                image_urls: [imageUrl],
+                input_image_url: imageUrl, // 🔥 ใช้ Cloudinary URL (ไม่หมดอายุ)
                 output_urls: [],
               })
               .select()
@@ -576,7 +602,7 @@ export async function POST(req: NextRequest) {
               const prediction = await replicate.predictions.create({
                 model: model,
                 input: {
-                  image: outputUrl,
+                  image: imageUrl, // 🔥 ใช้ Cloudinary URL (cropped if applicable)
                   scale: 2,
                   face_enhance: true, // ✅ เปิดอัตโนมัติสำหรับ auto-upscale (แก้หน้าคน)
                 },

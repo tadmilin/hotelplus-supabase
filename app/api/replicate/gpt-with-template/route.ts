@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
         background,
         moderation,
         inputFidelity,
-        outputCompression
+        outputCompression,
+        targetAspectRatio, // User's desired ratio (may differ from GPT ratio)
     } = body
 
     // Validate required parameters
@@ -131,13 +132,29 @@ export async function POST(request: NextRequest) {
 
         console.log('✅ GPT Image 1.5 prediction created:', prediction.id)
 
-        // Update job with prediction ID (ไม่ต้องใช้ pipeline metadata)
+        // Update job with prediction ID and targetAspectRatio in metadata
+        const updateData: Record<string, unknown> = {
+            replicate_id: prediction.id,
+            status: 'processing',
+        }
+        
+        // 🔥 Store targetAspectRatio in metadata for webhook to crop later
+        if (targetAspectRatio) {
+            // Fetch existing metadata to merge (prevent overwrite)
+            const { data: existingJob } = await supabaseAdmin
+                .from('jobs')
+                .select('metadata')
+                .eq('id', jobId)
+                .single()
+            
+            const existingMetadata = (existingJob?.metadata as Record<string, unknown>) || {}
+            updateData.metadata = { ...existingMetadata, targetAspectRatio }
+            console.log('📐 Will crop to:', targetAspectRatio)
+        }
+        
         const { error: updateError } = await supabaseAdmin
             .from('jobs')
-            .update({
-                replicate_id: prediction.id,
-                status: 'processing',
-            })
+            .update(updateData)
             .eq('id', jobId)
 
         if (updateError) {

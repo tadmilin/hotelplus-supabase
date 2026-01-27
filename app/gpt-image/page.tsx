@@ -15,6 +15,29 @@ interface DriveImage {
   url: string
 }
 
+// 🔥 Aspect Ratio Mapping: User ratio → GPT supported ratio
+// GPT Image 1.5 รองรับแค่: 1:1, 3:2, 2:3
+const ASPECT_RATIO_MAP: Record<string, { gptRatio: string }> = {
+  '1:1': { gptRatio: '1:1' },
+  '16:9': { gptRatio: '3:2' },  // Generate 3:2, crop to 16:9
+  '9:16': { gptRatio: '2:3' },  // Generate 2:3, crop to 9:16
+  '4:3': { gptRatio: '1:1' },   // Generate 1:1, crop to 4:3
+  '3:4': { gptRatio: '1:1' },   // Generate 1:1, crop to 3:4
+  '3:2': { gptRatio: '3:2' },   // Native support
+  '2:3': { gptRatio: '2:3' },   // Native support
+}
+
+// Helper: Get GPT-compatible ratio
+function getGptRatio(userRatio: string): string {
+  return ASPECT_RATIO_MAP[userRatio]?.gptRatio || '1:1'
+}
+
+// Helper: Check if ratio needs cropping
+function needsCrop(userRatio: string): boolean {
+  const mapping = ASPECT_RATIO_MAP[userRatio]
+  return mapping ? mapping.gptRatio !== userRatio : false
+}
+
 export default function GptImagePage() {
   const router = useRouter()
   const supabase = createClient()
@@ -761,6 +784,7 @@ export default function GptImagePage() {
       // 🔥 แยกโหมด: template กับไม่มี template
       if (useTemplate && jobData.template_url) {
         // ✅ TEMPLATE MODE: ส่งรูปทั้งหมดใน 1 job (แบบเดิม)
+        const gptRatio = getGptRatio(aspectRatio)
         const apiBody: Record<string, unknown> = {
           jobId: job.id,
           prompt: prompt,
@@ -768,7 +792,8 @@ export default function GptImagePage() {
           moderation: moderation,
           inputFidelity: inputFidelity,
           outputCompression: outputCompression,
-          aspectRatio: aspectRatio,
+          aspectRatio: gptRatio, // 🔥 ส่ง GPT ratio ที่รองรับ
+          targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined, // 🔥 ส่ง target ถ้าต้อง crop
           numberOfImages: numImages,
           quality: quality,
           outputFormat: outputFormat,
@@ -845,13 +870,15 @@ export default function GptImagePage() {
             separateJob = jobData
 
             // Call Replicate API
+            const gptRatioForJob = getGptRatio(aspectRatio)
             const response = await fetch('/api/replicate/gpt-image', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 jobId: jobData.id,
                 prompt: prompt,
-                aspectRatio: aspectRatio,
+                aspectRatio: gptRatioForJob, // 🔥 ส่ง GPT ratio ที่รองรับ
+                targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined, // 🔥 ส่ง target ถ้าต้อง crop
                 numberOfImages: 1, // 🔥 Hardcode = 1 (รูปละ 1 output)
                 quality: quality,
                 outputFormat: outputFormat,
@@ -918,6 +945,7 @@ export default function GptImagePage() {
         }
       } else {
         // ✅ NO TEMPLATE + ไม่มีรูป: ส่ง prompt อย่างเดียว (1 job)
+        const gptRatioForText = getGptRatio(aspectRatio)
         const apiBody: Record<string, unknown> = {
           jobId: job.id,
           prompt: prompt,
@@ -925,7 +953,8 @@ export default function GptImagePage() {
           moderation: moderation,
           inputFidelity: inputFidelity,
           outputCompression: outputCompression,
-          aspectRatio: aspectRatio,
+          aspectRatio: gptRatioForText, // 🔥 ส่ง GPT ratio ที่รองรับ
+          targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined, // 🔥 ส่ง target ถ้าต้อง crop
           numberOfImages: numImages,
           quality: quality,
           outputFormat: outputFormat,
@@ -1533,9 +1562,16 @@ export default function GptImagePage() {
               disabled={creating}
             >
               <option value="1:1">1:1 (Square - จัตุรัส)</option>
-              <option value="3:2">3:2 (Landscape - แนวนอน)</option>
-              <option value="2:3">2:3 (Portrait - แนวตั้ง)</option>
+              <option value="16:9">16:9 (Widescreen - จอกว้าง)</option>
+              <option value="9:16">9:16 (Vertical - แนวตั้ง/TikTok)</option>
+              <option value="4:3">4:3 (Classic - คลาสสิค)</option>
+              <option value="3:4">3:4 (Portrait Classic)</option>
+              <option value="3:2">3:2 (Photo Landscape)</option>
+              <option value="2:3">2:3 (Photo Portrait)</option>
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 ระบบจะสร้างและ crop ให้ได้อัตราส่วนที่ต้องการอัตโนมัติ
+            </p>
           </div>
 
           {/* Number of Images */}

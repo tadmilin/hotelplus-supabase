@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
       moderation,
       inputFidelity,
       outputCompression,
-      inputImages 
+      inputImages,
+      targetAspectRatio, // User's desired ratio (may differ from GPT ratio)
     } = body
 
     console.log('📥 GPT Image Request:', {
@@ -121,14 +122,30 @@ export async function POST(req: NextRequest) {
       throw new Error('Prediction is undefined after retries')
     }
 
-    // Update job with prediction ID and status
+    // Update job with prediction ID, status, and targetAspectRatio in metadata
     const supabase = await createClient()
+    const updateData: Record<string, unknown> = { 
+      replicate_id: prediction.id,
+      status: 'processing'
+    }
+    
+    // 🔥 Store targetAspectRatio in metadata for webhook to crop later
+    if (targetAspectRatio) {
+      // Fetch existing metadata to merge (prevent overwrite)
+      const { data: existingJob } = await supabase
+        .from('jobs')
+        .select('metadata')
+        .eq('id', jobId)
+        .single()
+      
+      const existingMetadata = (existingJob?.metadata as Record<string, unknown>) || {}
+      updateData.metadata = { ...existingMetadata, targetAspectRatio }
+      console.log('📐 Will crop to:', targetAspectRatio)
+    }
+    
     const { error: updateError } = await supabase
       .from('jobs')
-      .update({ 
-        replicate_id: prediction.id,
-        status: 'processing'
-      })
+      .update(updateData)
       .eq('id', jobId)
 
     if (updateError) {
