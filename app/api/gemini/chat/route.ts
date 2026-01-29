@@ -156,65 +156,17 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // บันทึกหรืออัพเดท conversation
-    if (conversationId) {
-      // อัพเดท conversation เดิม
-      const { error: updateError } = await supabase
-        .from("gemini_conversations")
-        .update({
-          history: updatedHistory,
-        })
-        .eq("id", conversationId)
-        .eq("user_id", user.id);
+    // Trigger auto-upscale
+    await performAutoUpscale();
 
-      if (updateError) {
-        console.error("Error updating conversation:", updateError);
-        return NextResponse.json(
-          { error: "Failed to update conversation" },
-          { status: 500 }
-        );
-      }
-
-      // Trigger auto-upscale
-      await performAutoUpscale();
-
-      return NextResponse.json({
-        conversationId,
-        response: response.text,
-        images: generatedImageUrls,
-        history: updatedHistory,
-      });
-    } else {
-      // สร้าง conversation ใหม่
-      const title =
-        message?.substring(0, 50) || "New Conversation";
-
-      const { data: conversation, error: insertError } = await supabase
-        .from("gemini_conversations")
-        .insert({
-          user_id: user.id,
-          title,
-          history: updatedHistory,
-        })
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error("Error creating conversation:", insertError);
-        return NextResponse.json(
-          { error: "Failed to create conversation" },
-          { status: 500 }
-        );
-      }
-      // Trigger auto-upscale
-      await performAutoUpscale();
-      return NextResponse.json({
-        conversationId: conversation.id,
-        response: response.text,
-        images: generatedImageUrls,
-        history: updatedHistory,
-      });
-    }
+    // 🔥 ไม่บันทึก conversation ลง database แล้ว (ประหยัดพื้นที่)
+    // History จะเก็บใน memory ของ frontend แทน
+    return NextResponse.json({
+      conversationId: conversationId || crypto.randomUUID(), // ใช้ UUID ชั่วคราว
+      response: response.text,
+      images: generatedImageUrls,
+      history: updatedHistory,
+    });
   } catch (error: any) {
     console.error("Error in Gemini chat:", error);
     return NextResponse.json(
