@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { v2 as cloudinary } from 'cloudinary'
 import sharp from 'sharp'
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-})
+import { uploadBufferToCloudinary } from '@/lib/cloudinary'
 
 // 🔥 Increase limits for large image uploads (Hobby plan max: 60s)
 export const maxDuration = 60 // 60 seconds (Vercel Hobby limit)
@@ -91,8 +85,6 @@ export async function POST(req: NextRequest) {
         
         const needsProcessing = buffer.length > 10 * 1024 * 1024 || isHeic
         
-        let mimeType = 'image/jpeg'
-        
         if (needsProcessing) {
           console.log(`🔄 Processing large/HEIC image: ${sanitizedName}`)
           
@@ -100,7 +92,6 @@ export async function POST(req: NextRequest) {
             // 🔥 ใช้ smart compression ที่รักษาคุณภาพหน้าคน
             const result = await smartCompress(buffer)
             buffer = Buffer.from(result.buffer)
-            mimeType = result.mimeType
             
             const compressedSizeMB = (buffer.length / (1024 * 1024)).toFixed(2)
             console.log(`✅ Smart compressed: ${originalSizeMB}MB → ${compressedSizeMB}MB`)
@@ -120,40 +111,15 @@ export async function POST(req: NextRequest) {
           }
         }
         
-        const base64 = buffer.toString('base64')
-        const dataUri = `data:${mimeType};base64,${base64}`
-
-        // Retry Cloudinary upload (max 2 attempts)
-        let result
-        const maxRetries = 2
+        // 🔥 Stream Upload - ไม่ต้องแปลง Base64 (ประหยัด memory 33%)
+        const publicId = `${Date.now()}_${sanitizedName.replace(/\.[^/.]+$/, '')}`
         
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            result = await cloudinary.uploader.upload(dataUri, {
-              folder: 'hotelplus-v2',
-              resource_type: 'image',
-              public_id: `${Date.now()}_${sanitizedName.replace(/\.[^/.]+$/, '')}`,
-              timeout: 60000, // 60 seconds
-            })
-            console.log(`✅ Uploaded successfully (attempt ${attempt}): ${sanitizedName}`)
-            break // Success
-          } catch (uploadError) {
-            const isLastAttempt = attempt === maxRetries
-            
-            if (isLastAttempt) {
-              console.error(`❌ Upload failed after ${maxRetries} attempts:`, uploadError)
-              throw uploadError
-            }
-            
-            const backoffMs = 2000 * attempt
-            console.log(`⚠️ Upload attempt ${attempt} failed, retrying in ${backoffMs}ms...`)
-            await new Promise(resolve => setTimeout(resolve, backoffMs))
-          }
-        }
-
-        if (!result) {
-          throw new Error('Upload result is undefined')
-        }
+        const result = await uploadBufferToCloudinary(buffer, {
+          folder: 'hotelplus-v2',
+          publicId,
+        })
+        
+        console.log(`✅ Uploaded successfully (stream): ${sanitizedName}`)
 
         uploadedImages.push({
           id: result.public_id,

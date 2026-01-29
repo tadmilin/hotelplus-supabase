@@ -1,10 +1,79 @@
 import { v2 as cloudinary } from 'cloudinary'
+import { Readable } from 'stream'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
+
+// 🔥 NEW: Stream-based upload (ไม่ต้องแปลง Base64 = ประหยัด memory 33%)
+export async function uploadBufferToCloudinary(
+  buffer: Buffer,
+  options: {
+    folder?: string
+    publicId?: string
+    quality?: string
+    transformation?: Record<string, unknown>[]
+  } = {}
+): Promise<{ secure_url: string; public_id: string }> {
+  const maxRetries = 2
+  const { 
+    folder = 'hotelplus-v2', 
+    publicId,
+    quality = 'auto:good',
+    transformation
+  } = options
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const uploadOptions: Record<string, unknown> = {
+          folder,
+          resource_type: 'image',
+          quality,
+          fetch_format: 'auto',
+          timeout: 60000,
+        }
+
+        if (publicId) uploadOptions.public_id = publicId
+        if (transformation) uploadOptions.transformation = transformation
+
+        const uploadStream = cloudinary.uploader.upload_stream(
+          uploadOptions,
+          (error, result) => {
+            if (error) {
+              reject(error)
+            } else if (result) {
+              resolve({
+                secure_url: result.secure_url,
+                public_id: result.public_id,
+              })
+            } else {
+              reject(new Error('Upload result is undefined'))
+            }
+          }
+        )
+
+        // Pipe buffer to upload stream
+        Readable.from(buffer).pipe(uploadStream)
+      })
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries
+
+      if (isLastAttempt) {
+        console.error('Cloudinary stream upload error:', error)
+        throw error
+      }
+
+      const backoffMs = 2000 * attempt
+      console.log(`⚠️ Stream upload attempt ${attempt} failed, retrying in ${backoffMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, backoffMs))
+    }
+  }
+
+  throw new Error('Stream upload failed after retries')
+}
 
 export async function uploadToCloudinary(imageUrl: string, folder: string = 'hotelplus') {
   try {
