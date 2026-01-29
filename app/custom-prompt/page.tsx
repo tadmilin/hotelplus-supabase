@@ -761,6 +761,12 @@ export default function CustomPromptPage() {
 
             const result = await response.json()
             await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[i])
+            
+            // 🔥 Delay 10 วินาทีก่อนทำ job ถัดไป (ป้องกัน rate limit)
+            if (i < jobIds.length - 1) {
+              setStatus(`⏳ รอ 10 วินาที... (${i + 1}/${jobIds.length})`)
+              await new Promise(resolve => setTimeout(resolve, 10000))
+            }
           } catch (apiError) {
             await supabase.from('jobs').update({
               status: 'failed',

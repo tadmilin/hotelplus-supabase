@@ -90,6 +90,9 @@ export default function GptImagePage() {
   const [templateSearch, setTemplateSearch] = useState('')
   const [loadingTemplates, setLoadingTemplates] = useState(false)
 
+  // 🔀 Process Mode: merge (รวมรูป) vs each (แยกทีละรูป)
+  const [processMode, setProcessMode] = useState<'merge' | 'each'>('merge')
+
   // 🚀 Lazy load template images
   useEffect(() => {
     if (templateImages.length === 0) {
@@ -826,11 +829,66 @@ export default function GptImagePage() {
           throw apiError
         }
       } else if (imageUrls.length > 0) {
-        // ✅ NO TEMPLATE + มีรูป: แยกรูปละ 1 job (แบบ custom-prompt)
-        // ต้องลบ job แรกที่สร้างไว้ เพราะจะสร้าง N jobs แทน
-        await supabase.from('jobs').delete().eq('id', job.id)
+        // ✅ NO TEMPLATE + มีรูป
         
-        const results = { success: 0, failed: 0, errors: [] as string[] }
+        if (processMode === 'merge') {
+          // 🔀 MERGE MODE: ส่งทุกรูปใน 1 API call
+          const gptRatio = getGptRatio(aspectRatio)
+          const apiBody: Record<string, unknown> = {
+            jobId: job.id,
+            prompt: prompt,
+            background: background,
+            moderation: moderation,
+            inputFidelity: inputFidelity,
+            outputCompression: outputCompression,
+            aspectRatio: gptRatio,
+            targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined,
+            numberOfImages: numImages,
+            quality: quality,
+            outputFormat: outputFormat,
+            inputImages: imageUrls, // 🔥 ส่งทุกรูปรวมกัน
+          }
+
+          try {
+            setStatus('🔀 กำลังรวมรูปและส่งไป AI...')
+            const response = await fetch('/api/replicate/gpt-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(apiBody),
+            })
+
+            if (!response.ok) {
+              const errorData = await response.json()
+              throw new Error(errorData.error || 'Failed to create images')
+            }
+
+            const result = await response.json()
+
+            if (result.id) {
+              await supabase
+                .from('jobs')
+                .update({ replicate_id: result.id })
+                .eq('id', job.id)
+            }
+
+            console.log('✅ Merge mode: 1 job created with', imageUrls.length, 'images')
+            router.push('/dashboard')
+          } catch (apiError) {
+            await supabase
+              .from('jobs')
+              .update({ 
+                status: 'failed',
+                error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+              })
+              .eq('id', job.id)
+            throw apiError
+          }
+        } else {
+          // 📑 EACH MODE: แยกรูปละ 1 job + delay 10 วินาที
+          // ต้องลบ job แรกที่สร้างไว้ เพราะจะสร้าง N jobs แทน
+          await supabase.from('jobs').delete().eq('id', job.id)
+        
+          const results = { success: 0, failed: 0, errors: [] as string[] }
         
         for (let i = 0; i < imageUrls.length; i++) {
           let separateJob: { id: string } | null = null
@@ -922,6 +980,12 @@ export default function GptImagePage() {
 
             results.success++
             console.log(`✅ Job ${i + 1}/${imageUrls.length} created successfully`)
+            
+            // 🔥 Delay 10 วินาทีก่อนทำ job ถัดไป (ป้องกัน rate limit)
+            if (i < imageUrls.length - 1) {
+              setStatus(`⏳ รอ 10 วินาที... (${i + 1}/${imageUrls.length})`)
+              await new Promise(resolve => setTimeout(resolve, 10000))
+            }
           } catch (jobErr: unknown) {
             console.error(`❌ Job ${i + 1}/${imageUrls.length} error:`, jobErr)
             const errMsg = jobErr instanceof Error ? jobErr.message : 'Unknown error'
@@ -955,6 +1019,7 @@ export default function GptImagePage() {
           // ล้มเหลวทั้งหมด
           throw new Error(`สร้างล้มเหลวทั้งหมด: ${results.errors[0] || 'Unknown error'}`)
         }
+        } // End of EACH mode
       } else {
         // ✅ NO TEMPLATE + ไม่มีรูป: ส่ง prompt อย่างเดียว (1 job)
         const gptRatioForText = getGptRatio(aspectRatio)
@@ -1717,6 +1782,48 @@ export default function GptImagePage() {
                 💡 <strong>Input Fidelity:</strong> Low = AI สร้างสรรค์มากขึ้น | High = ใกล้เคียงรูปต้นฉบับ
               </p>
             </div>
+
+            {/* 🔀 Process Mode Toggle - แสดงเมื่อเลือกหลายรูป */}
+            {!useTemplate && (inputImages.length > 1 || selectedDriveImages.length > 1) && (
+              <div className="mt-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl p-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  🔀 โหมดประมวลผลรูป ({inputImages.length + selectedDriveImages.length} รูป)
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setProcessMode('merge')}
+                    disabled={creating}
+                    className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
+                      processMode === 'merge'
+                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
+                        : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-purple-400'
+                    }`}
+                  >
+                    <span className="block text-lg">🔀 Merge</span>
+                    <span className="block text-xs mt-1 opacity-80">รวมรูปใน 1 API call</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProcessMode('each')}
+                    disabled={creating}
+                    className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
+                      processMode === 'each'
+                        ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg'
+                        : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-orange-400'
+                    }`}
+                  >
+                    <span className="block text-lg">📑 Each</span>
+                    <span className="block text-xs mt-1 opacity-80">แยกทีละรูป (delay 10s)</span>
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  {processMode === 'merge' 
+                    ? '✅ เร็วกว่า - AI จะรวมลักษณะจากทุกรูปเป็นผลลัพธ์เดียว' 
+                    : '⚠️ ช้ากว่า - สร้างแยกทีละรูปเพื่อหลีกเลี่ยง rate limit'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Submit Button */}
