@@ -45,7 +45,7 @@ export async function uploadToCloudinaryForReplicate(imageUrl: string, folder: s
   }
 }
 
-// สำหรับ upscaled images - เก็บขนาดเต็ม
+// สำหรับ upscaled images - เก็บขนาดเต็ม (แต่ optimize format)
 export async function uploadToCloudinaryFullSize(imageUrl: string, folder: string = 'hotelplus') {
   const maxRetries = 2
   
@@ -54,6 +54,8 @@ export async function uploadToCloudinaryFullSize(imageUrl: string, folder: strin
       const result = await cloudinary.uploader.upload(imageUrl, {
         folder,
         resource_type: 'image',
+        quality: 'auto:good', // 🔥 Consistent optimization
+        fetch_format: 'auto', // 🔥 Auto WebP
         timeout: 60000, // 60 seconds
       })
       return result.secure_url
@@ -83,6 +85,7 @@ export async function uploadBase64ToCloudinary(base64Data: string, folder: strin
         folder,
         resource_type: 'image',
         format: 'jpg',
+        quality: 'auto:good', // 🔥 Consistent optimization
         transformation: [
           { width: 1440, height: 1440, crop: "limit" }
         ],
@@ -115,6 +118,8 @@ export async function uploadImageFullSize(base64Data: string, folder: string = '
       const result = await cloudinary.uploader.upload(base64Data, {
         folder,
         resource_type: 'image',
+        quality: 'auto:good', // 🔥 Consistent optimization
+        fetch_format: 'auto', // 🔥 Auto WebP
         timeout: 60000,
       })
       return result.secure_url
@@ -176,7 +181,8 @@ export async function uploadAndCropToAspectRatio(
             aspect_ratio: `${w}:${h}`,
             crop: 'fill',        // Fill to exact ratio, may crop edges
             gravity: 'center',   // Center the crop
-            quality: 'auto:best',
+            quality: 'auto:good', // 🔥 Consistent optimization
+            fetch_format: 'auto', // 🔥 Auto WebP
           }
         ],
       })
