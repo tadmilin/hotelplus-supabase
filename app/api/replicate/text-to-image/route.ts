@@ -22,6 +22,23 @@ export async function POST(req: NextRequest) {
 
     console.log('📥 Text-to-Image Request:', { jobId, hasPrompt: !!prompt, outputSize })
 
+    // 🛡️ GUARD: Check if job already has a prediction (prevent duplicates on retry)
+    const supabaseCheck = await createClient()
+    const { data: existingJob } = await supabaseCheck
+      .from('jobs')
+      .select('replicate_id')
+      .eq('id', jobId)
+      .single()
+
+    if (existingJob?.replicate_id) {
+      console.log('⚠️ Job already has prediction, skipping duplicate:', existingJob.replicate_id)
+      return NextResponse.json({
+        success: true,
+        id: existingJob.replicate_id,
+        message: 'Job already has prediction - skipped duplicate'
+      })
+    }
+
     // Use Imagen 4 Ultra (Google) for text-to-image
     // Note: Create one prediction per job (no num_outputs - handled by frontend loop)
     const input = {

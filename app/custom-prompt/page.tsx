@@ -716,63 +716,108 @@ export default function CustomPromptPage() {
 
       // Call Replicate API(s)
       if (enableTemplate && finalTemplateUrl) {
-        setStatus('🎨 กำลังส่งงานไป Replicate...')
-        try {
-          const response = await fetch('/api/replicate/custom-prompt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jobId: jobIds[0],
-              prompt: customPrompt,
-              imageUrls: imageUrls,
-              templateUrl: finalTemplateUrl,
-              outputSize: outputSize,
-            }),
-          })
-
-          if (!response.ok) throw new Error('Failed to create job')
-
-          const result = await response.json()
-          await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[0])
-        } catch (apiError) {
-          await supabase.from('jobs').update({
-            status: 'failed',
-            error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
-          }).eq('id', jobIds[0])
-          throw apiError
-        }
-      } else {
-        for (let i = 0; i < jobIds.length; i++) {
-          setStatus(`🎨 กำลังส่งงานที่ ${i + 1}/${jobIds.length}...`)
+        // 🔄 Smart Frontend Retry (3 attempts) - Template Mode
+        const maxRetries = 3
+        let lastError: Error | null = null
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
           try {
+            setStatus(attempt > 1 
+              ? `🔄 Retry ${attempt}/${maxRetries}... กำลังส่งงาน` 
+              : '🎨 กำลังส่งงานไป Replicate...')
+            
             const response = await fetch('/api/replicate/custom-prompt', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                jobId: jobIds[i],
+                jobId: jobIds[0],
                 prompt: customPrompt,
-                imageUrls: [imageUrls[i]],
-                templateUrl: null,
+                imageUrls: imageUrls,
+                templateUrl: finalTemplateUrl,
                 outputSize: outputSize,
               }),
             })
 
-            if (!response.ok) throw new Error(`Failed to create job ${i + 1}`)
+            if (!response.ok) throw new Error('Failed to create job')
 
             const result = await response.json()
-            await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[i])
-            
-            // 🔥 Delay 10 วินาทีก่อนทำ job ถัดไป (ป้องกัน rate limit)
-            if (i < jobIds.length - 1) {
-              setStatus(`⏳ รอ 10 วินาที... (${i + 1}/${jobIds.length})`)
-              await new Promise(resolve => setTimeout(resolve, 10000))
-            }
+            await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[0])
+            break // Success - exit retry loop
           } catch (apiError) {
+            lastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+            console.log(`⚠️ Template mode attempt ${attempt}/${maxRetries} failed:`, lastError.message)
+            
+            if (attempt < maxRetries) {
+              const delayMs = 5000 * attempt
+              setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${maxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, delayMs))
+            } else {
+              // All retries failed
+              await supabase.from('jobs').update({
+                status: 'failed',
+                error: lastError.message || 'Replicate API failed after 3 retries'
+              }).eq('id', jobIds[0])
+              throw lastError
+            }
+          }
+        }
+      } else {
+        for (let i = 0; i < jobIds.length; i++) {
+          // 🔄 Smart Frontend Retry (3 attempts) - ใช้ jobIds[i] เดิม
+          const maxRetries = 3
+          let jobSuccess = false
+          let lastError = ''
+          
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              setStatus(attempt > 1 
+                ? `🔄 Retry ${attempt}/${maxRetries}... Job ${i + 1}/${jobIds.length}` 
+                : `🎨 กำลังส่งงานที่ ${i + 1}/${jobIds.length}...`)
+              
+              const response = await fetch('/api/replicate/custom-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jobId: jobIds[i],
+                  prompt: customPrompt,
+                  imageUrls: [imageUrls[i]],
+                  templateUrl: null,
+                  outputSize: outputSize,
+                }),
+              })
+
+              if (!response.ok) throw new Error(`Failed to create job ${i + 1}`)
+
+              const result = await response.json()
+              await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[i])
+              jobSuccess = true
+              console.log(`✅ Job ${i + 1}/${jobIds.length} created successfully`)
+              break // Success - exit retry loop
+            } catch (apiError) {
+              lastError = apiError instanceof Error ? apiError.message : 'Unknown error'
+              console.log(`⚠️ Job ${i + 1} attempt ${attempt}/${maxRetries} failed:`, lastError)
+              
+              if (attempt < maxRetries) {
+                const delayMs = 5000 * attempt
+                setStatus(`⚠️ Job ${i + 1} ล้มเหลว รอ ${delayMs/1000}s... (Retry ${attempt}/${maxRetries})`)
+                await new Promise(resolve => setTimeout(resolve, delayMs))
+              }
+            }
+          }
+          
+          // If all retries failed for this job
+          if (!jobSuccess) {
             await supabase.from('jobs').update({
               status: 'failed',
-              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+              error: lastError || 'Replicate API failed after 3 retries'
             }).eq('id', jobIds[i])
-            throw apiError
+            throw new Error(`Job ${i + 1} failed after ${maxRetries} retries: ${lastError}`)
+          }
+            
+          // 🔥 Delay 10 วินาทีก่อนทำ job ถัดไป (ป้องกัน rate limit)
+          if (i < jobIds.length - 1) {
+            setStatus(`⏳ รอ 10 วินาที... (${i + 1}/${jobIds.length})`)
+            await new Promise(resolve => setTimeout(resolve, 10000))
           }
         }
       }

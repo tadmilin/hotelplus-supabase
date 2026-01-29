@@ -15,6 +15,7 @@ export default function TextToImagePage() {
   const [numImages, setNumImages] = useState(4)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [status, setStatus] = useState('') // 🔄 For retry status display
 
   useEffect(() => {
     async function checkAuth() {
@@ -71,27 +72,58 @@ export default function TextToImagePage() {
             continue
           }
 
-          // Call Replicate API for this job
-          const response = await fetch('/api/replicate/text-to-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jobId: job.id,
-              prompt: prompt,
-              outputSize: outputSize,
-            }),
-          })
+          // 🔄 Smart Frontend Retry (3 attempts) - Text-to-Image
+          const maxRetries = 3
+          let jobSuccess = false
+          let lastError = ''
+          
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              setStatus(attempt > 1 
+                ? `🔄 Retry ${attempt}/${maxRetries}... Job ${i + 1}/${numImages}` 
+                : `🎨 กำลังสร้างรูป ${i + 1}/${numImages}...`)
+              
+              const response = await fetch('/api/replicate/text-to-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jobId: job.id,
+                  prompt: prompt,
+                  outputSize: outputSize,
+                }),
+              })
 
-          if (!response.ok) {
-            const errorData = await response.json()
-            console.error(`❌ Job ${i + 1}/${numImages} API failed:`, errorData.error)
-            results.failed++
-            results.errors.push(`Job ${i + 1}: ${errorData.error}`)
-            continue
+              if (!response.ok) {
+                const errorData = await response.json()
+                throw new Error(errorData.error || 'API call failed')
+              }
+
+              jobSuccess = true
+              results.success++
+              console.log(`✅ Job ${i + 1}/${numImages} created successfully`)
+              break // Success - exit retry loop
+            } catch (apiError) {
+              lastError = apiError instanceof Error ? apiError.message : 'Unknown error'
+              console.log(`⚠️ Job ${i + 1} attempt ${attempt}/${maxRetries} failed:`, lastError)
+              
+              if (attempt < maxRetries) {
+                const delayMs = 5000 * attempt
+                setStatus(`⚠️ Job ${i + 1} ล้มเหลว รอ ${delayMs/1000}s... (Retry ${attempt}/${maxRetries})`)
+                await new Promise(resolve => setTimeout(resolve, delayMs))
+              }
+            }
           }
-
-          results.success++
-          console.log(`✅ Job ${i + 1}/${numImages} created successfully`)
+          
+          // If all retries failed for this job
+          if (!jobSuccess) {
+            console.error(`❌ Job ${i + 1}/${numImages} failed after ${maxRetries} retries`)
+            await supabase
+              .from('jobs')
+              .update({ status: 'failed', error: lastError || 'API failed after retries' })
+              .eq('id', job.id)
+            results.failed++
+            results.errors.push(`Job ${i + 1}: ${lastError}`)
+          }
         } catch (jobErr: unknown) {
           console.error(`❌ Job ${i + 1}/${numImages} error:`, jobErr)
           results.failed++
@@ -241,7 +273,7 @@ export default function TextToImagePage() {
             {creating ? (
               <>
                 <span className="inline-block animate-spin mr-2">⏳</span>
-                กำลังสร้าง... กรุณารอสักครู่
+                {status || 'กำลังสร้าง... กรุณารอสักครู่'}
               </>
             ) : (
               <>

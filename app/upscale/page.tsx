@@ -132,31 +132,62 @@ export default function UpscalePage() {
 
       if (jobError) throw jobError
 
-      // Call Replicate API
-      const response = await fetch('/api/replicate/upscale', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: job.id,
-          imageUrl: imageUrl,
-          scale: scale,
-          faceEnhance: faceEnhance,
-        }),
-      })
+      // 🔄 Smart Frontend Retry (3 attempts) - Upscale Mode
+      const maxRetries = 3
+      let lastError: Error | null = null
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          setStatus(attempt > 1 
+            ? `🔄 Retry ${attempt}/${maxRetries}... กำลัง Upscale` 
+            : '🔍 กำลัง Upscale...')
+          
+          const response = await fetch('/api/replicate/upscale', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: job.id,
+              imageUrl: imageUrl,
+              scale: scale,
+              faceEnhance: faceEnhance,
+            }),
+          })
 
-      if (!response.ok) {
-        throw new Error('Failed to upscale')
+          if (!response.ok) {
+            throw new Error('Failed to upscale')
+          }
+
+          const result = await response.json()
+
+          // Update job with replicate_id
+          await supabase
+            .from('jobs')
+            .update({ replicate_id: result.id })
+            .eq('id', job.id)
+
+          router.push('/dashboard')
+          return // Success - exit function
+        } catch (apiError) {
+          lastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+          console.log(`⚠️ Upscale attempt ${attempt}/${maxRetries} failed:`, lastError.message)
+          
+          if (attempt < maxRetries) {
+            const delayMs = 5000 * attempt
+            setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${maxRetries})`)
+            await new Promise(resolve => setTimeout(resolve, delayMs))
+          }
+        }
       }
-
-      const result = await response.json()
-
-      // Update job with replicate_id
+      
+      // All retries failed - update job status
       await supabase
         .from('jobs')
-        .update({ replicate_id: result.id })
+        .update({ 
+          status: 'failed',
+          error: lastError?.message || 'Upscale failed after 3 retries'
+        })
         .eq('id', job.id)
-
-      router.push('/dashboard')
+      throw lastError
     } catch (err: unknown) {
       console.error('Error:', err)
       setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการ Upscale')

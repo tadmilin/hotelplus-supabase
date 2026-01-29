@@ -804,30 +804,51 @@ export default function GptImagePage() {
           templateUrl: jobData.template_url,
         }
 
-        try {
-          const response = await fetch('/api/replicate/gpt-with-template', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(apiBody),
-          })
-
-          if (!response.ok) {
-            const errorData = await response.json()
-            throw new Error(errorData.error || 'Failed to create images')
-          }
-
-          console.log('✅ Template mode: 1 job created')
-          router.push('/dashboard')
-        } catch (apiError) {
-          await supabase
-            .from('jobs')
-            .update({ 
-              status: 'failed',
-              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+        // 🔄 Smart Frontend Retry (3 attempts) - Template Mode
+        const templateMaxRetries = 3
+        let templateLastError: Error | null = null
+        
+        for (let attempt = 1; attempt <= templateMaxRetries; attempt++) {
+          try {
+            setStatus(attempt > 1 
+              ? `🔄 Retry ${attempt}/${templateMaxRetries}... Template Mode` 
+              : '🎨 กำลังส่งงาน Template...')
+            
+            const response = await fetch('/api/replicate/gpt-with-template', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(apiBody),
             })
-            .eq('id', job.id)
-          throw apiError
+
+            if (!response.ok) {
+              const errorData = await response.json()
+              throw new Error(errorData.error || 'Failed to create images')
+            }
+
+            console.log('✅ Template mode: 1 job created')
+            router.push('/dashboard')
+            return // Success - exit function
+          } catch (apiError) {
+            templateLastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+            console.log(`⚠️ Template attempt ${attempt}/${templateMaxRetries} failed:`, templateLastError.message)
+            
+            if (attempt < templateMaxRetries) {
+              const delayMs = 5000 * attempt
+              setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${templateMaxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, delayMs))
+            }
+          }
         }
+        
+        // All retries failed
+        await supabase
+          .from('jobs')
+          .update({ 
+            status: 'failed',
+            error: templateLastError?.message || 'Replicate API failed after 3 retries'
+          })
+          .eq('id', job.id)
+        throw templateLastError
       } else if (imageUrls.length > 0) {
         // ✅ NO TEMPLATE + มีรูป
         
@@ -849,40 +870,60 @@ export default function GptImagePage() {
             inputImages: imageUrls, // 🔥 ส่งทุกรูปรวมกัน
           }
 
-          try {
-            setStatus('🔀 กำลังรวมรูปและส่งไป AI...')
-            const response = await fetch('/api/replicate/gpt-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(apiBody),
-            })
-
-            if (!response.ok) {
-              const errorData = await response.json()
-              throw new Error(errorData.error || 'Failed to create images')
-            }
-
-            const result = await response.json()
-
-            if (result.id) {
-              await supabase
-                .from('jobs')
-                .update({ replicate_id: result.id })
-                .eq('id', job.id)
-            }
-
-            console.log('✅ Merge mode: 1 job created with', imageUrls.length, 'images')
-            router.push('/dashboard')
-          } catch (apiError) {
-            await supabase
-              .from('jobs')
-              .update({ 
-                status: 'failed',
-                error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+          // 🔄 Smart Frontend Retry (3 attempts) - ใช้ job.id เดิม ไม่สร้าง duplicate
+          const maxRetries = 3
+          let lastError: Error | null = null
+          
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              setStatus(attempt > 1 
+                ? `🔄 Retry ${attempt}/${maxRetries}... กำลังส่งไป AI` 
+                : '🔀 กำลังรวมรูปและส่งไป AI...')
+              
+              const response = await fetch('/api/replicate/gpt-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(apiBody),
               })
-              .eq('id', job.id)
-            throw apiError
+
+              if (!response.ok) {
+                const errorData = await response.json()
+                throw new Error(errorData.error || 'Failed to create images')
+              }
+
+              const result = await response.json()
+
+              if (result.id) {
+                await supabase
+                  .from('jobs')
+                  .update({ replicate_id: result.id })
+                  .eq('id', job.id)
+              }
+
+              console.log('✅ Merge mode: 1 job created with', imageUrls.length, 'images')
+              router.push('/dashboard')
+              return // Success - exit function
+            } catch (apiError) {
+              lastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+              console.log(`⚠️ Attempt ${attempt}/${maxRetries} failed:`, lastError.message)
+              
+              if (attempt < maxRetries) {
+                const delayMs = 5000 * attempt // 5s, 10s
+                setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${maxRetries})`)
+                await new Promise(resolve => setTimeout(resolve, delayMs))
+              }
+            }
           }
+          
+          // All retries failed
+          await supabase
+            .from('jobs')
+            .update({ 
+              status: 'failed',
+              error: lastError?.message || 'Replicate API failed after 3 retries'
+            })
+            .eq('id', job.id)
+          throw lastError
         } else {
           // 📑 EACH MODE: แยกรูปละ 1 job + delay 10 วินาที
           // ต้องลบ job แรกที่สร้างไว้ เพราะจะสร้าง N jobs แทน
@@ -939,47 +980,68 @@ export default function GptImagePage() {
 
             separateJob = jobData
 
-            // Call Replicate API
+            // 🔄 Smart Frontend Retry (3 attempts) - ใช้ jobData.id เดิม
             const gptRatioForJob = getGptRatio(aspectRatio)
-            const response = await fetch('/api/replicate/gpt-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jobId: jobData.id,
-                prompt: prompt,
-                aspectRatio: gptRatioForJob, // 🔥 ส่ง GPT ratio ที่รองรับ
-                targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined, // 🔥 ส่ง target ถ้าต้อง crop
-                numberOfImages: 1, // 🔥 Hardcode = 1 (รูปละ 1 output)
-                quality: quality,
-                outputFormat: outputFormat,
-                background: background,
-                moderation: moderation,
-                inputFidelity: inputFidelity,
-                outputCompression: outputCompression,
-                inputImages: [imageUrls[i]], // ส่งแค่รูปเดียว
-              }),
-            })
+            const eachMaxRetries = 3
+            let eachSuccess = false
+            let eachLastError = ''
+            
+            for (let attempt = 1; attempt <= eachMaxRetries; attempt++) {
+              try {
+                setStatus(attempt > 1 
+                  ? `🔄 Retry ${attempt}/${eachMaxRetries}... Job ${i + 1}/${imageUrls.length}` 
+                  : `📤 กำลังส่ง Job ${i + 1}/${imageUrls.length}...`)
+                
+                const response = await fetch('/api/replicate/gpt-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jobId: jobData.id,
+                    prompt: prompt,
+                    aspectRatio: gptRatioForJob,
+                    targetAspectRatio: needsCrop(aspectRatio) ? aspectRatio : undefined,
+                    numberOfImages: 1,
+                    quality: quality,
+                    outputFormat: outputFormat,
+                    background: background,
+                    moderation: moderation,
+                    inputFidelity: inputFidelity,
+                    outputCompression: outputCompression,
+                    inputImages: [imageUrls[i]],
+                  }),
+                })
 
-            if (!response.ok) {
-              const errorData = await response.json()
-              console.error(`❌ Job ${i + 1}/${imageUrls.length} API failed:`, errorData.error)
-              
-              // Update job status to failed
+                if (!response.ok) {
+                  const errorData = await response.json()
+                  throw new Error(errorData.error || 'API call failed')
+                }
+
+                eachSuccess = true
+                results.success++
+                console.log(`✅ Job ${i + 1}/${imageUrls.length} created successfully`)
+                break // Success - exit retry loop
+              } catch (retryError) {
+                eachLastError = retryError instanceof Error ? retryError.message : 'Unknown error'
+                console.log(`⚠️ Job ${i + 1} attempt ${attempt}/${eachMaxRetries} failed:`, eachLastError)
+                
+                if (attempt < eachMaxRetries) {
+                  const delayMs = 5000 * attempt
+                  setStatus(`⚠️ Job ${i + 1} ล้มเหลว รอ ${delayMs/1000}s... (Retry ${attempt}/${eachMaxRetries})`)
+                  await new Promise(resolve => setTimeout(resolve, delayMs))
+                }
+              }
+            }
+            
+            // If all retries failed for this job
+            if (!eachSuccess) {
+              console.error(`❌ Job ${i + 1}/${imageUrls.length} failed after ${eachMaxRetries} retries`)
               await supabase
                 .from('jobs')
-                .update({ 
-                  status: 'failed',
-                  error: errorData.error || 'API call failed'
-                })
+                .update({ status: 'failed', error: eachLastError || 'API failed after retries' })
                 .eq('id', jobData.id)
-              
               results.failed++
-              results.errors.push(`Job ${i + 1}: ${errorData.error}`)
-              continue
+              results.errors.push(`Job ${i + 1}: ${eachLastError}`)
             }
-
-            results.success++
-            console.log(`✅ Job ${i + 1}/${imageUrls.length} created successfully`)
             
             // 🔥 Delay 10 วินาทีก่อนทำ job ถัดไป (ป้องกัน rate limit)
             if (i < imageUrls.length - 1) {
@@ -1037,39 +1099,60 @@ export default function GptImagePage() {
           outputFormat: outputFormat,
         }
 
-        try {
-          const response = await fetch('/api/replicate/gpt-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(apiBody),
-          })
-
-          if (!response.ok) {
-            const errorData = await response.json()
-            throw new Error(errorData.error || 'Failed to create images')
-          }
-
-          const result = await response.json()
-
-          if (result.id) {
-            await supabase
-              .from('jobs')
-              .update({ replicate_id: result.id })
-              .eq('id', job.id)
-          }
-
-          console.log('✅ Text-only mode: 1 job created')
-          router.push('/dashboard')
-        } catch (apiError) {
-          await supabase
-            .from('jobs')
-            .update({ 
-              status: 'failed',
-              error: apiError instanceof Error ? apiError.message : 'Replicate API failed'
+        // 🔄 Smart Frontend Retry (3 attempts) - Text-Only Mode
+        const textMaxRetries = 3
+        let textLastError: Error | null = null
+        
+        for (let attempt = 1; attempt <= textMaxRetries; attempt++) {
+          try {
+            setStatus(attempt > 1 
+              ? `🔄 Retry ${attempt}/${textMaxRetries}... กำลังส่งไป AI` 
+              : '📝 กำลังสร้างจาก Prompt...')
+            
+            const response = await fetch('/api/replicate/gpt-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(apiBody),
             })
-            .eq('id', job.id)
-          throw apiError
+
+            if (!response.ok) {
+              const errorData = await response.json()
+              throw new Error(errorData.error || 'Failed to create images')
+            }
+
+            const result = await response.json()
+
+            if (result.id) {
+              await supabase
+                .from('jobs')
+                .update({ replicate_id: result.id })
+                .eq('id', job.id)
+            }
+
+            console.log('✅ Text-only mode: 1 job created')
+            router.push('/dashboard')
+            return // Success - exit function
+          } catch (apiError) {
+            textLastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+            console.log(`⚠️ Text-only attempt ${attempt}/${textMaxRetries} failed:`, textLastError.message)
+            
+            if (attempt < textMaxRetries) {
+              const delayMs = 5000 * attempt
+              setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${textMaxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, delayMs))
+            }
+          }
         }
+        
+        // All retries failed
+        await supabase
+          .from('jobs')
+          .update({ 
+            status: 'failed',
+            error: textLastError?.message || 'Replicate API failed after 3 retries'
+          })
+          .eq('id', job.id)
+        throw textLastError
       }
     } catch (err: unknown) {
       console.error('Error:', err)
