@@ -836,6 +836,12 @@ export default function GptImagePage() {
           let separateJob: { id: string } | null = null
           
           try {
+            console.log(`📝 Creating job ${i + 1}/${imageUrls.length}:`, {
+              imageUrl: imageUrls[i],
+              aspectRatio,
+              prompt: prompt.substring(0, 50) + '...',
+            })
+            
             // สร้าง job แยกสำหรับรูปแต่ละรูป
             const { data: jobData, error: separateJobError } = await supabase
               .from('jobs')
@@ -861,9 +867,15 @@ export default function GptImagePage() {
               .single()
 
             if (separateJobError || !jobData) {
-              console.error(`❌ Job ${i + 1}/${imageUrls.length} creation failed:`, separateJobError)
+              console.error(`❌ Job ${i + 1}/${imageUrls.length} creation failed:`, {
+                error: separateJobError,
+                code: separateJobError?.code,
+                message: separateJobError?.message,
+                details: separateJobError?.details,
+                hint: separateJobError?.hint,
+              })
               results.failed++
-              results.errors.push(`Job ${i + 1}: ${separateJobError?.message || 'Failed to create job'}`)
+              results.errors.push(`Job ${i + 1}: ${separateJobError?.message || separateJobError?.code || 'Failed to create job'}`)
               continue
             }
 
@@ -1674,8 +1686,7 @@ export default function GptImagePage() {
                   className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-black focus:ring-2 focus:ring-purple-500"
                   disabled={creating}
                 >
-                  <option value="low">Low (Creative)</option>
-                  <option value="medium">Medium</option>
+                  <option value="low">Low (Creative - อิสระในการสร้าง)</option>
                   <option value="high">High (ใกล้เคียงต้นฉบับ)</option>
                 </select>
               </div>
