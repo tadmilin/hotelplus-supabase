@@ -11,7 +11,8 @@ export async function uploadToCloudinary(imageUrl: string, folder: string = 'hot
     const result = await cloudinary.uploader.upload(imageUrl, {
       folder,
       resource_type: 'image',
-      // Resize to ~1440p for better face detail
+      quality: 'auto:good', // Optimize: ใช้ good แทน best
+      fetch_format: 'auto',
       transformation: [
         { width: 1440, height: 1440, crop: "limit" }
       ]
@@ -30,10 +31,12 @@ export async function uploadToCloudinaryForReplicate(imageUrl: string, folder: s
     const result = await cloudinary.uploader.upload(imageUrl, {
       folder,
       resource_type: 'image',
-      // 🔥 ไม่ resize - รักษาขนาดเต็มเพื่อให้ AI detect หน้าได้ดีขึ้น
-      // ถ้ารูปใหญ่มาก Replicate จะ handle เอง
-      quality: 'auto:best', // รักษาคุณภาพสูงสุด
-      fetch_format: 'auto', // ให้ Cloudinary เลือก format ที่ดีที่สุด
+      // 🔥 Optimize: ลด quality และ resize เล็กน้อย (ประหยัด credits)
+      quality: 'auto:good', // เปลี่ยนจาก auto:best → auto:good (ประหยัด ~30%)
+      fetch_format: 'auto',
+      transformation: [
+        { width: 2048, height: 2048, crop: "limit" } // จำกัดขนาดสูงสุด 2K (เพียงพอสำหรับ AI)
+      ]
     })
     return result.secure_url
   } catch (error) {

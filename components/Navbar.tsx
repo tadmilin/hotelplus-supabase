@@ -92,16 +92,6 @@ export default function Navbar() {
                   🎨 GPT Image
                 </Link>
                 <Link 
-                  href="/freepik"
-                  className={`px-4 py-2 rounded-lg transition-all ${
-                    pathname === '/freepik' 
-                      ? 'bg-white text-gray-900 font-semibold' 
-                      : 'hover:bg-gray-700'
-                  }`}
-                >
-                  🌟 Freepik AI
-                </Link>
-                <Link 
                   href="/upscale"
                   className={`px-4 py-2 rounded-lg transition-all ${
                     pathname === '/upscale' 
