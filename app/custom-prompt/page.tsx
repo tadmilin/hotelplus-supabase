@@ -1349,7 +1349,7 @@ export default function CustomPromptPage() {
                 </div>
                 {processMode === 'merge' && (
                   <p className="text-xs text-amber-600 mt-3 flex items-center gap-1">
-                    ⚠️ แนะนำไม่เกิน 5 รูป - รูปเยอะอาจทำให้ AI fail
+                    
                   </p>
                 )}
               </div>
