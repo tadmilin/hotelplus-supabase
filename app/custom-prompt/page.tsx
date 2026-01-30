@@ -51,7 +51,10 @@ export default function CustomPromptPage() {
   const [templateSearch, setTemplateSearch] = useState('')
   const [loadingTemplates, setLoadingTemplates] = useState(false)
   
-  // 🔍 Search state
+  // � Process Mode: merge (รวมรูป) vs each (แยกทีละรูป)
+  const [processMode, setProcessMode] = useState<'merge' | 'each'>('each')
+  
+  // �🔍 Search state
   const [folderSearch, setFolderSearch] = useState('')
 
   useEffect(() => {
@@ -545,6 +548,12 @@ export default function CustomPromptPage() {
       return
     }
 
+    // 🔥 Merge mode limit: 10 images max
+    if (processMode === 'merge' && !enableTemplate && selectedImagesMap.size > 10) {
+      alert('⚠️ Merge mode รองรับสูงสุด 10 รูป')
+      return
+    }
+
     setCreating(true)
     setStatus('กำลังเตรียมรูปภาพ...')
 
@@ -580,8 +589,28 @@ export default function CustomPromptPage() {
 
         if (jobError) throw jobError
         jobIds.push(job.id)
+      } else if (processMode === 'merge') {
+        // 🔀 MERGE MODE: Create single job with all images
+        const { data: job, error: jobError } = await supabase
+          .from('jobs')
+          .insert({
+            user_id: user.id,
+            user_name: user.user_metadata?.name || null,
+            user_email: user.email,
+            job_type: 'custom-prompt',
+            status: 'processing',
+            prompt: customPrompt,
+            output_size: outputSize,
+            image_urls: tempImageUrls, // ส่งทุกรูป
+            output_urls: [],
+          })
+          .select()
+          .single()
+
+        if (jobError) throw jobError
+        jobIds.push(job.id)
       } else {
-        // NO TEMPLATE: Create separate job for EACH image
+        // 📦 EACH MODE: Create separate job for EACH image
         for (let i = 0; i < tempImageUrls.length; i++) {
           const { data: job, error: jobError } = await supabase
             .from('jobs')
@@ -706,7 +735,13 @@ export default function CustomPromptPage() {
         await supabase.from('jobs').update({
           image_urls: imageUrls
         }).eq('id', jobIds[0])
+      } else if (processMode === 'merge') {
+        // 🔀 MERGE MODE: single job with all images
+        await supabase.from('jobs').update({
+          image_urls: imageUrls
+        }).eq('id', jobIds[0])
       } else {
+        // 📦 EACH MODE: each job gets one image
         for (let i = 0; i < jobIds.length; i++) {
           await supabase.from('jobs').update({
             image_urls: [imageUrls[i]]
@@ -761,7 +796,54 @@ export default function CustomPromptPage() {
             }
           }
         }
+      } else if (processMode === 'merge') {
+        // 🔀 MERGE MODE: Single job with all images
+        const maxRetries = 3
+        let lastError: Error | null = null
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            setStatus(attempt > 1 
+              ? `🔄 Retry ${attempt}/${maxRetries}... กำลังส่งงาน` 
+              : `🎨 กำลังส่งงาน (Merge ${imageUrls.length} รูป)...`)
+            
+            const response = await fetch('/api/replicate/custom-prompt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jobId: jobIds[0],
+                prompt: customPrompt,
+                imageUrls: imageUrls, // ส่งทุกรูป
+                templateUrl: null,
+                outputSize: outputSize,
+              }),
+            })
+
+            if (!response.ok) throw new Error('Failed to create job')
+
+            const result = await response.json()
+            await supabase.from('jobs').update({ replicate_id: result.id }).eq('id', jobIds[0])
+            break // Success - exit retry loop
+          } catch (apiError) {
+            lastError = apiError instanceof Error ? apiError : new Error('Unknown error')
+            console.log(`⚠️ Merge mode attempt ${attempt}/${maxRetries} failed:`, lastError.message)
+            
+            if (attempt < maxRetries) {
+              const delayMs = 5000 * attempt
+              setStatus(`⚠️ ล้มเหลว รอ ${delayMs/1000}s แล้วลองใหม่... (${attempt}/${maxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, delayMs))
+            } else {
+              // All retries failed
+              await supabase.from('jobs').update({
+                status: 'failed',
+                error: lastError.message || 'Replicate API failed after 3 retries'
+              }).eq('id', jobIds[0])
+              throw lastError
+            }
+          }
+        }
       } else {
+        // 📦 EACH MODE: separate job for each image
         for (let i = 0; i < jobIds.length; i++) {
           // 🔄 Smart Frontend Retry (3 attempts) - ใช้ jobIds[i] เดิม
           const maxRetries = 3
@@ -1227,12 +1309,58 @@ export default function CustomPromptPage() {
               </div>
             )}
 
+            {/* Process Mode - แสดงเมื่อไม่มี template และเลือกรูป > 1 */}
+            {selectedImagesMap.size > 1 && customPrompt.trim() && !enableTemplate && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="text-lg font-bold text-purple-900 mb-4">
+                  🔀 โหมดประมวลผล ({selectedImagesMap.size} รูป)
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setProcessMode('merge')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      processMode === 'merge'
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 hover:border-purple-300'
+                    }`}
+                  >
+                    <div className="text-2xl mb-2">🎨</div>
+                    <div className="font-semibold text-gray-900">รวม (Merge)</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      ส่งทุกรูปพร้อมกัน = 1 Job<br/>
+                      AI เห็นบริบททั้งหมด
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setProcessMode('each')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      processMode === 'each'
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 hover:border-purple-300'
+                    }`}
+                  >
+                    <div className="text-2xl mb-2">📦</div>
+                    <div className="font-semibold text-gray-900">แยก (Each)</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      ทีละรูป = {selectedImagesMap.size} Jobs<br/>
+                      ประมวลผลแยกกัน
+                    </div>
+                  </button>
+                </div>
+                {processMode === 'merge' && (
+                  <p className="text-xs text-amber-600 mt-3 flex items-center gap-1">
+                    ⚠️ แนะนำไม่เกิน 5 รูป - รูปเยอะอาจทำให้ AI fail
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Template */}
             {selectedImagesMap.size > 0 && customPrompt.trim() && (
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-purple-900">
-                    3️⃣ Template (ไม่บังคับ)
+                    {selectedImagesMap.size > 1 && !enableTemplate ? '4️⃣' : '3️⃣'} Template (ไม่บังคับ)
                   </h3>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input

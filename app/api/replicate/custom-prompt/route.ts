@@ -55,7 +55,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 🛡️ GUARD: Check if job already has a prediction (prevent duplicates on retry)
+    // � Merge mode validation: max 10 images without template
+    if (!templateUrl && validImageUrls.length > 10) {
+      return NextResponse.json(
+        { error: 'Max 10 images for merge mode. More images increase failure rate.' },
+        { status: 400 }
+      )
+    }
+
+    // �🛡️ GUARD: Check if job already has a prediction (prevent duplicates on retry)
     const supabaseCheck = await createClient()
     const { data: existingJob } = await supabaseCheck
       .from('jobs')
@@ -159,16 +167,18 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // NO TEMPLATE: Create separate prediction for EACH image
-    // Only use first image for this prediction (Frontend will handle creating multiple jobs)
+    // NO TEMPLATE: Use all images sent from frontend
+    // Frontend controls: merge mode = all images, each mode = 1 image per job
     const input: Record<string, unknown> = {
-      image_input: [validImageUrls[0]],  // Use only the first image
+      image_input: validImageUrls,  // 🔥 ใช้ทุกรูปที่ส่งมา (frontend ควบคุม)
       prompt: prompt,
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
       resolution: '1K',
       safety_filter_level: 'block_only_high', // 🔥 Same as Replicate web UI default
     }
+
+    console.log(`📸 Processing ${validImageUrls.length} image(s) without template`)
 
     // Retry logic (max 3 attempts)
     let prediction
