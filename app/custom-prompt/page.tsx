@@ -1247,6 +1247,7 @@ export default function CustomPromptPage() {
                           fill
                           sizes="(max-width: 768px) 50vw, 25vw"
                           className="object-cover"
+                          unoptimized
                         />
                       </div>
                       <button
@@ -1558,6 +1559,7 @@ export default function CustomPromptPage() {
                                 fill
                                 sizes="(max-width: 768px) 50vw, 20vw"
                                 className="object-cover"
+                                unoptimized
                               />
                               {selectedTemplate === img.url && (
                                 <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">

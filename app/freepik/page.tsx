@@ -925,6 +925,7 @@ export default function FreepikPage() {
                             width={100}
                             height={100}
                             className="w-full h-20 object-cover"
+                            unoptimized
                           />
                           {selectedTemplate === img.url && (
                             <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center">
@@ -1069,6 +1070,7 @@ export default function FreepikPage() {
                           width={80}
                           height={80}
                           className="w-full h-16 object-cover"
+                          unoptimized
                         />
                         {selectedImagesMap.has(img.id) && (
                           <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center">
