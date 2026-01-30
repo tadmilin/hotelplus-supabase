@@ -27,11 +27,124 @@ interface Job {
   _originalCount?: number  // จำนวนรูปต้นฉบับก่อนรวม upscale
 }
 
-// Helper: แปลง Drive URL → Cached Cloudinary URL
+// Helper: แปลง Drive URL → Cached Cloudinary URL (with localStorage cache)
+// 🚀 OPTIMIZED: ใช้ localStorage เพื่อไม่ต้อง fetch ซ้ำเมื่อ refresh
+const CACHE_KEY = 'drive_url_cache'
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000 // 24 ชั่วโมง
+const MAX_CACHE_ENTRIES = 500 // จำกัดไม่เกิน 500 entries (~300KB)
+
+interface CacheEntry {
+  url: string
+  timestamp: number
+}
+
+function getUrlFromLocalCache(url: string): string | null {
+  try {
+    const cacheJson = localStorage.getItem(CACHE_KEY)
+    if (!cacheJson) return null
+    
+    const cache = JSON.parse(cacheJson) as Record<string, CacheEntry>
+    const entry = cache[url]
+    
+    if (!entry) return null
+    
+    // ตรวจสอบว่า cache หมดอายุหรือไม่
+    if (Date.now() - entry.timestamp > CACHE_EXPIRY_MS) {
+      // ลบ entry ที่หมดอายุ
+      delete cache[url]
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+      return null
+    }
+    
+    return entry.url
+  } catch {
+    return null
+  }
+}
+
+function saveUrlToLocalCache(originalUrl: string, cachedUrl: string): void {
+  try {
+    const cacheJson = localStorage.getItem(CACHE_KEY)
+    let cache: Record<string, CacheEntry> = cacheJson ? JSON.parse(cacheJson) : {}
+    
+    // 🧹 ถ้าเกิน limit → ลบ entries เก่าสุด
+    const entries = Object.entries(cache)
+    if (entries.length >= MAX_CACHE_ENTRIES) {
+      // Sort by timestamp (เก่าสุดก่อน)
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp)
+      
+      // ลบ 20% entries เก่าสุด (ไม่ต้องลบทีละอัน)
+      const deleteCount = Math.ceil(MAX_CACHE_ENTRIES * 0.2)
+      
+      cache = Object.fromEntries(
+        entries.slice(deleteCount)
+      )
+      
+      console.log(`🧹 Cache cleanup: removed ${deleteCount} old entries`)
+    }
+    
+    // เพิ่ม entry ใหม่
+    cache[originalUrl] = {
+      url: cachedUrl,
+      timestamp: Date.now()
+    }
+    
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  } catch (error) {
+    // localStorage เต็ม → ลบ cache ทั้งหมดแล้วเริ่มใหม่
+    console.warn('⚠️ localStorage full, clearing cache:', error)
+    try {
+      localStorage.removeItem(CACHE_KEY)
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        [originalUrl]: { url: cachedUrl, timestamp: Date.now() }
+      }))
+    } catch {
+      // ถ้ายังเต็มอีก (หรือ disabled) ก็ไม่ต้องทำอะไร
+    }
+  }
+}
+
+// 🧹 Cleanup: ลบ entries หมดอายุ (เรียกเมื่อ load หน้า)
+function cleanupExpiredCache(): void {
+  try {
+    const cacheJson = localStorage.getItem(CACHE_KEY)
+    if (!cacheJson) return
+    
+    const cache = JSON.parse(cacheJson) as Record<string, CacheEntry>
+    const now = Date.now()
+    let cleaned = 0
+    
+    for (const key of Object.keys(cache)) {
+      if (now - cache[key].timestamp > CACHE_EXPIRY_MS) {
+        delete cache[key]
+        cleaned++
+      }
+    }
+    
+    if (cleaned > 0) {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+      console.log(`🧹 Cleaned up ${cleaned} expired cache entries`)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// เรียก cleanup เมื่อ load module
+if (typeof window !== 'undefined') {
+  cleanupExpiredCache()
+}
+
 async function getCachedUrl(url: string): Promise<string> {
-  // ถ้าเป็น Cloudinary อยู่แล้ว → ใช้เลย
+  // ✅ ถ้าเป็น Cloudinary อยู่แล้ว → ใช้เลย (ไม่ต้อง API call!)
   if (url.includes('cloudinary.com') || url.includes('res.cloudinary.com')) {
     return url
+  }
+  
+  // ✅ เช็ค localStorage cache ก่อน (ไม่ต้อง API call!)
+  const localCached = getUrlFromLocalCache(url)
+  if (localCached) {
+    return localCached
   }
   
   // ถ้าเป็น Drive URL → ดึง fileId แล้วขอ cached URL
@@ -57,6 +170,8 @@ async function getCachedUrl(url: string): Promise<string> {
       
       if (response.ok) {
         const data = await response.json()
+        // ✅ บันทึกลง localStorage cache
+        saveUrlToLocalCache(url, data.url)
         return data.url
       } else {
         console.error('Failed to get cached URL:', response.statusText)
@@ -83,10 +198,25 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [cachedUrls, setCachedUrls] = useState<Map<string, string>>(new Map()) // URL cache
+  // 🚀 REMOVED: cachedUrls state - ใช้ localStorage แทน (persistent across refresh)
+
+  // Helper: ตรวจสอบว่าเป็น auto-upscale job หรือไม่
+  const isAutoUpscaleJob = useCallback((job: Job): boolean => {
+    return job.job_type === 'upscale' && (job.prompt?.includes('from job') ?? false)
+  }, [])
+
+  // Helper: กรอง auto-upscale jobs ออก
+  const filterAutoUpscaleJobs = useCallback((jobsList: Job[]): Job[] => {
+    return jobsList.filter(job => !isAutoUpscaleJob(job))
+  }, [isAutoUpscaleJob])
 
   const fetchJobs = useCallback(async (showLoadingSpinner = true) => {
-    if (showLoadingSpinner) setLoading(true)
+    if (showLoadingSpinner) {
+      setLoading(true)
+      console.log('🔄 Fetching jobs (with spinner)...')
+    } else {
+      console.log('🔄 Fetching jobs (silent)...')
+    }
     
     try {
       // ดึง jobs ทั้งหมด
@@ -102,23 +232,23 @@ export default function DashboardPage() {
 
       const { data, error } = await query
 
-      if (error) throw error
+      if (error) {
+        console.error('❌ Error fetching jobs:', error)
+        throw error
+      }
       
-      // 🔥 กรองออกเฉพาะ auto-upscale (ที่มี "from job" ใน prompt)
-      // แต่เก็บ manual upscale ไว้แสดง
-      const filteredJobs = (data || []).filter(job => {
-        if (job.job_type !== 'upscale') return true // เก็บ job ธรรมดา
-        // upscale job: เก็บเฉพาะ manual (ไม่มี "from job")
-        return !job.prompt?.includes('from job')
-      })
+      // 🔥 กรองออกเฉพาะ auto-upscale (ใช้ helper function)
+      const filteredJobs = filterAutoUpscaleJobs(data || [])
       
+      console.log(`✅ Fetched ${filteredJobs.length} jobs (${(data || []).length - filteredJobs.length} auto-upscale filtered out)`)
       setJobs(filteredJobs)
     } catch (error) {
-      console.error('Error fetching jobs:', error)
+      console.error('❌ Error in fetchJobs:', error)
+      // ไม่ต้อง throw error ออกไป เพื่อไม่ให้ UI crash
     } finally {
       if (showLoadingSpinner) setLoading(false)
     }
-  }, [supabase, isAdmin, userId])
+  }, [supabase, isAdmin, userId, filterAutoUpscaleJobs])
 
   useEffect(() => {
     // Check auth
@@ -150,9 +280,11 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, supabase]) // ✅ เอา fetchJobs ออก
 
-  // Real-time subscription
+  // Real-time subscription - Optimized to update only changed jobs
   useEffect(() => {
     if (!userId) return
+
+    console.log('🔌 Subscribing to realtime updates...')
 
     const channel = supabase
       .channel('jobs-changes')
@@ -166,26 +298,91 @@ export default function DashboardPage() {
           filter: isAdmin ? undefined : `user_id=eq.${userId}`,
         },
         (payload) => {
-          console.log('Real-time update:', payload)
-          fetchJobs(false) // Silent refresh
+          const newData = payload.new as Job | null
+          const oldData = payload.old as Job | null
+          console.log('📡 Realtime update:', payload.eventType, newData?.id || oldData?.id)
+          
+          // ป้องกัน race condition ด้วย functional state update
+          setJobs(prevJobs => {
+            try {
+              if (payload.eventType === 'INSERT') {
+                const newJob = newData
+                if (!newJob) return prevJobs
+                
+                // ถ้าเป็น auto-upscale job ไม่ต้องแสดง
+                if (isAutoUpscaleJob(newJob)) {
+                  console.log('⏭️ Skipping auto-upscale job:', newJob.id)
+                  return prevJobs
+                }
+                
+                // เช็คว่ามี job นี้อยู่แล้วหรือไม่ (ป้องกัน duplicate)
+                if (prevJobs.some(j => j.id === newJob.id)) {
+                  console.log('⚠️ Job already exists, updating instead:', newJob.id)
+                  return prevJobs.map(j => j.id === newJob.id ? newJob : j)
+                }
+                
+                console.log('➕ Adding new job:', newJob.id)
+                return [newJob, ...prevJobs]
+              }
+              
+              if (payload.eventType === 'UPDATE') {
+                const updatedJob = newData
+                if (!updatedJob) return prevJobs
+                
+                // ถ้าเป็น auto-upscale job ลบออกถ้ามี
+                if (isAutoUpscaleJob(updatedJob)) {
+                  console.log('🗑️ Removing auto-upscale job:', updatedJob.id)
+                  return prevJobs.filter(j => j.id !== updatedJob.id)
+                }
+                
+                // อัพเดทเฉพาะ job ที่เปลี่ยน
+                const jobExists = prevJobs.some(j => j.id === updatedJob.id)
+                if (!jobExists) {
+                  console.log('➕ Job not found, adding:', updatedJob.id)
+                  return [updatedJob, ...prevJobs]
+                }
+                
+                console.log('🔄 Updating job:', updatedJob.id, '→', updatedJob.status)
+                return prevJobs.map(j => 
+                  j.id === updatedJob.id ? updatedJob : j
+                )
+              }
+              
+              if (payload.eventType === 'DELETE') {
+                const deletedId = oldData?.id
+                if (!deletedId) return prevJobs
+                console.log('➖ Removing job:', deletedId)
+                return prevJobs.filter(j => j.id !== deletedId)
+              }
+              
+              return prevJobs
+            } catch (error) {
+              console.error('❌ Error handling realtime update:', error)
+              // ถ้า error ให้ fallback ไป fetch ใหม่
+              fetchJobs(false)
+              return prevJobs
+            }
+          })
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Realtime connected')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Realtime connection error')
+        } else if (status === 'TIMED_OUT') {
+          console.error('⏱️ Realtime connection timeout')
+        } else if (status === 'CLOSED') {
+          console.log('🔌 Realtime connection closed')
+        }
+      })
 
     return () => {
+      console.log('🔌 Unsubscribing from realtime...')
       channel.unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, userId, isAdmin]) // ✅ เอา fetchJobs ออก
-
-  // Auto-refresh every 10 seconds as fallback (เพิ่มจาก 5 → 10)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchJobs(false)
-    }, 10000) // ✅ เพิ่มเป็น 10 วินาที
-    return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // ✅ เอา fetchJobs ออก
+  }, [supabase, userId, isAdmin, isAutoUpscaleJob])
 
   function getStatusColor(status: string): string {
     switch (status) {
@@ -242,22 +439,6 @@ export default function DashboardPage() {
     } else {
       return `${seconds} วินาที`
     }
-  }
-  
-  // Helper: Get optimized image URL (with caching)
-  async function getOptimizedUrl(url: string): Promise<string> {
-    // Check cache first
-    if (cachedUrls.has(url)) {
-      return cachedUrls.get(url)!
-    }
-    
-    // Get cached URL
-    const optimizedUrl = await getCachedUrl(url)
-    
-    // Store in cache
-    setCachedUrls(prev => new Map(prev).set(url, optimizedUrl))
-    
-    return optimizedUrl
   }
 
   async function handleViewImages(job: Job) {
@@ -331,22 +512,52 @@ export default function DashboardPage() {
   }
 
   // Component: Optimized Image with caching
+  // 🚀 OPTIMIZED: Skip API call ถ้าเป็น Cloudinary URL อยู่แล้ว
   function OptimizedImage({ url, alt, className }: { url: string, alt: string, className?: string }) {
-    const [displayUrl, setDisplayUrl] = useState(url)
+    const [displayUrl, setDisplayUrl] = useState<string | null>(null)
     const [imgLoading, setImgLoading] = useState(true)
 
     useEffect(() => {
+      let isMounted = true
+      
       async function loadUrl() {
+        // ✅ ถ้าเป็น Cloudinary URL → ใช้เลย ไม่ต้อง async!
+        if (url.includes('cloudinary.com')) {
+          if (isMounted) {
+            setDisplayUrl(url)
+            setImgLoading(false)
+          }
+          return
+        }
+        
+        // ✅ เช็ค localStorage ก่อน (synchronous)
+        const localCached = getUrlFromLocalCache(url)
+        if (localCached) {
+          if (isMounted) {
+            setDisplayUrl(localCached)
+            setImgLoading(false)
+          }
+          return
+        }
+        
+        // ❌ ถ้าเป็น Drive URL → ต้องเรียก API (rare case)
         setImgLoading(true)
-        const optimized = await getOptimizedUrl(url)
-        setDisplayUrl(optimized)
-        setImgLoading(false)
+        const optimized = await getCachedUrl(url)
+        if (isMounted) {
+          setDisplayUrl(optimized)
+          setImgLoading(false)
+        }
       }
+      
       loadUrl()
+      
+      return () => {
+        isMounted = false
+      }
     }, [url])
 
     // Show loading state
-    if (imgLoading) {
+    if (imgLoading || !displayUrl) {
       return (
         <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
           <span className="text-gray-400 text-sm">⏳</span>
@@ -408,7 +619,7 @@ export default function DashboardPage() {
             )}
           </div>
           <p className="text-gray-600">
-            {isAdmin ? 'งานของทุกคน' : 'งานของคุณ'} {jobs.length} งาน • อัพเดทอัตโนมัติทุก 5 วินาที
+            {isAdmin ? 'งานของทุกคน' : 'งานของคุณ'} {jobs.length} งาน • 📡 อัพเดทแบบ Real-time
           </p>
         </div>
 
