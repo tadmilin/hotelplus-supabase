@@ -1197,6 +1197,7 @@ export default function CustomPromptPage() {
                           fill
                           sizes="(max-width: 768px) 50vw, 25vw"
                           className="object-cover"
+                          unoptimized
                         />
                         {isSelected && (
                           <div className="absolute inset-0 bg-purple-600/30 flex items-center justify-center">
