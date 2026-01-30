@@ -1,4 +1,4 @@
--- Create users table (extends Supabase auth.users)
+
 CREATE TABLE public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT UNIQUE NOT NULL,
