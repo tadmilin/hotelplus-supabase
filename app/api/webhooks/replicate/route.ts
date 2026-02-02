@@ -590,7 +590,8 @@ export async function POST(req: NextRequest) {
       await exportJobToSheets(job.id)
 
       // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, gpt-with-template, etc.)
-      const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image', 'gpt-with-template']
+      // 🔥 custom-prompt, custom-template, custom-prompt-template ใช้ 2K output แล้ว ไม่ต้อง upscale
+      const nonUpscaleTypes = ['text-to-image', 'gpt-image', 'gpt-with-template']
       
       // 🛡️ CRITICAL FIX: Skip auto-upscale if this is Step 2 of gpt-with-template pipeline
       // Step 2 is the final template composition step - upscaling it would cause duplicate upscale
