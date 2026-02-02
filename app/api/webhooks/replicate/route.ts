@@ -214,26 +214,48 @@ export async function POST(req: NextRequest) {
     
     if (!job) {
       console.log('🔍 No job found by replicate_id, searching in metadata...')
-      // ค้นหา job ที่มี gptPredictions ใน metadata (pipeline jobs)
-      // Filter เฉพาะ pending/processing และ created ใน 24 ชม. ล่าสุด
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      const { data: metadataJobs } = await supabaseAdmin
-        .from('jobs')
-        .select('*')
-        .not('metadata', 'is', null)
-        .in('status', ['pending', 'processing', 'processing_template'])
-        .gte('created_at', oneDayAgo)
-        .order('created_at', { ascending: false })
-        .limit(200)
       
-      if (metadataJobs) {
-        job = metadataJobs.find(j => {
-          const meta = j.metadata as { gptPredictions?: string[] } | null
-          return meta?.gptPredictions?.includes(replicateId)
-        }) || null
+      // 🚀 Try PostgreSQL JSONB query via RPC first (faster)
+      let useJsFallback = false
+      
+      try {
+        const { data: rpcJob, error: rpcError } = await supabaseAdmin
+          .rpc('find_job_by_prediction', { p_prediction_id: replicateId })
+          .single()
         
-        if (job) {
-          console.log('✅ Found job in metadata search:', job.id)
+        if (!rpcError && rpcJob) {
+          job = rpcJob
+          console.log('✅ Found job via RPC:', job.id)
+        } else if (rpcError) {
+          console.log('⚠️ RPC error, using JS fallback:', rpcError.code, rpcError.message)
+          useJsFallback = true
+        }
+      } catch (rpcException) {
+        console.log('⚠️ RPC exception, using JS fallback:', rpcException)
+        useJsFallback = true
+      }
+      
+      // Fallback: JS filter if RPC failed or returned no result
+      if (!job && (useJsFallback || true)) {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const { data: metadataJobs } = await supabaseAdmin
+          .from('jobs')
+          .select('*')
+          .not('metadata', 'is', null)
+          .in('status', ['pending', 'processing', 'processing_template'])
+          .gte('created_at', oneDayAgo)
+          .order('created_at', { ascending: false })
+          .limit(200)
+        
+        if (metadataJobs) {
+          job = metadataJobs.find(j => {
+            const meta = j.metadata as { gptPredictions?: string[] } | null
+            return meta?.gptPredictions?.includes(replicateId)
+          }) || null
+          
+          if (job) {
+            console.log('✅ Found job via JS fallback:', job.id)
+          }
         }
       }
     }
@@ -247,6 +269,13 @@ export async function POST(req: NextRequest) {
 
     // Process webhook based on status
     if (status === 'succeeded' || status === 'completed') {
+      // 🛡️ CRITICAL GUARD: Prevent duplicate processing if job already completed/failed
+      // Check current status in DB (job object might be stale due to race condition)
+      if (job.status === 'completed' || job.status === 'failed') {
+        console.log('⚠️ Job already completed/failed, skipping duplicate webhook:', job.id, 'status:', job.status)
+        return NextResponse.json({ received: true, skipped: true, reason: 'already_completed' })
+      }
+      
       // Extract output URLs
       let outputUrls: string[] = []
       
@@ -562,13 +591,52 @@ export async function POST(req: NextRequest) {
 
       // Auto-upscale x2 for non-upscale jobs (text-to-image, custom-prompt, gpt-image, gpt-with-template, etc.)
       const nonUpscaleTypes = ['text-to-image', 'custom-prompt', 'custom-template', 'custom-prompt-template', 'gpt-image', 'gpt-with-template']
-      if (nonUpscaleTypes.includes(job.job_type) && permanentUrls.length > 0) {
-        console.log('🔍 Starting auto-upscale x2 for job:', job.id)
+      
+      // 🛡️ CRITICAL FIX: Skip auto-upscale if this is Step 2 of gpt-with-template pipeline
+      // Step 2 is the final template composition step - upscaling it would cause duplicate upscale
+      const isPipelineStep2 = jobMetadata?.pipeline === 'gpt-with-template' && jobMetadata?.step === 2
+      
+      if (nonUpscaleTypes.includes(job.job_type) && permanentUrls.length > 0 && !isPipelineStep2) {
+        // 🛡️ ATOMIC LOCK: Prevent duplicate auto-upscale from concurrent webhooks
+        // Use PostgreSQL RPC with atomic check-and-set to prevent race condition
+        // Only proceeds if autoUpscaleTriggered is NOT already true
+        const { data: lockData, error: lockError } = await supabaseAdmin.rpc('try_lock_auto_upscale', {
+          p_job_id: job.id
+        })
         
-        try {
-          // 🔥 Use permanentUrls (Cloudinary URLs that are already cropped if targetAspectRatio was set)
-          // This ensures upscale uses the final cropped image, not the temp URL
-          const urlsToUpscale = permanentUrls
+        // If RPC doesn't exist yet, fallback to simple check
+        let canProceed = false
+        if (lockError?.message?.includes('function') || lockError?.code === '42883') {
+          // RPC not available - use simple metadata check (less safe but works)
+          const currentMeta = job.metadata as { autoUpscaleTriggered?: boolean } | null
+          if (!currentMeta?.autoUpscaleTriggered) {
+            // Set flag first, then proceed
+            await supabaseAdmin
+              .from('jobs')
+              .update({ 
+                metadata: { ...(job.metadata || {}), autoUpscaleTriggered: true }
+              })
+              .eq('id', job.id)
+            canProceed = true
+          }
+        } else {
+          canProceed = lockData === true
+        }
+        
+        if (!canProceed) {
+          console.log('⚠️ Auto-upscale already triggered for job, skipping:', job.id)
+        } else {
+          console.log('🔍 Starting auto-upscale x2 for job:', job.id, 'urls:', permanentUrls.length)
+        
+          try {
+            // 🔥 Use permanentUrls (Cloudinary URLs that are already cropped if targetAspectRatio was set)
+            // This ensures upscale uses the final cropped image, not the temp URL
+            // 🛡️ CRITICAL: Deduplicate URLs to prevent double upscale
+            const urlsToUpscale = [...new Set(permanentUrls)]
+          
+            if (urlsToUpscale.length !== permanentUrls.length) {
+              console.log('⚠️ Removed duplicate URLs:', permanentUrls.length, '→', urlsToUpscale.length)
+            }
 
           // Create upscale jobs for each output
           for (const imageUrl of urlsToUpscale) {
@@ -620,10 +688,11 @@ export async function POST(req: NextRequest) {
             }
           }
           
-          console.log('✅ Auto-upscale jobs created')
-        } catch (upscaleError) {
-          console.error('⚠️ Auto-upscale error (non-critical):', upscaleError)
-        }
+            console.log('✅ Auto-upscale jobs created')
+          } catch (upscaleError) {
+            console.error('⚠️ Auto-upscale error (non-critical):', upscaleError)
+          }
+        } // End of upscale lock success block
       }
 
       return NextResponse.json({ success: true })
