@@ -1802,8 +1802,8 @@ export default function GptImagePage() {
                   disabled={creating}
                 >
                   <option value="auto">Auto</option>
-                  <option value="preserve">Preserve (รักษาพื้นหลังเดิม)</option>
-                  <option value="remove">Remove (ลบพื้นหลัง)</option>
+                  <option value="transparent">Transparent (พื้นหลังโปร่งใส)</option>
+                  <option value="opaque">Opaque (พื้นหลังทึบ)</option>
                 </select>
               </div>
 
@@ -1819,8 +1819,7 @@ export default function GptImagePage() {
                   disabled={creating}
                 >
                   <option value="auto">Auto (แนะนำ)</option>
-                  <option value="strict">Strict</option>
-                  <option value="off">Off</option>
+                  <option value="low">Low</option>
                 </select>
               </div>
 

@@ -108,6 +108,16 @@ export async function POST(request: NextRequest) {
         
         console.log(`📸 Creating single GPT Image 1.5 prediction with ${allInputImages.length} images`)
 
+        // Validate parameters (only specific values are valid)
+        const validBackgrounds = ['auto', 'transparent', 'opaque']
+        const validatedBackground = background && validBackgrounds.includes(background) ? background : 'auto'
+        
+        const validModerations = ['auto', 'low']
+        const validatedModeration = moderation && validModerations.includes(moderation) ? moderation : 'auto'
+        
+        const validFidelities = ['low', 'high']
+        const validatedFidelity = inputFidelity && validFidelities.includes(inputFidelity) ? inputFidelity : 'low'
+
         // สร้าง input ตาม GPT Image 1.5 API specification
         const gptInput: Record<string, unknown> = {
             prompt: templatePrompt,
@@ -117,9 +127,9 @@ export async function POST(request: NextRequest) {
             quality: quality || 'auto',
             output_format: outputFormat || 'webp',
             output_compression: outputCompression || 90,
-            moderation: moderation || 'auto',
-            background: background || 'auto',
-            input_fidelity: inputFidelity || 'low', // Low = creative freedom, High = strict adherence
+            moderation: validatedModeration,
+            background: validatedBackground,
+            input_fidelity: validatedFidelity, // Low = creative freedom, High = strict adherence
         }
 
         // Retry logic for Replicate API (max 3 attempts)

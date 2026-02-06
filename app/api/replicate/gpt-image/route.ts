@@ -75,15 +75,25 @@ export async function POST(req: NextRequest) {
     // Create prediction with openai/gpt-image-1.5
     const model = 'openai/gpt-image-1.5'
     
+    // Validate parameters (only specific values are valid)
+    const validBackgrounds = ['auto', 'transparent', 'opaque']
+    const validatedBackground = background && validBackgrounds.includes(background) ? background : 'auto'
+    
+    const validModerations = ['auto', 'low']
+    const validatedModeration = moderation && validModerations.includes(moderation) ? moderation : 'auto'
+    
+    const validFidelities = ['low', 'high']
+    const validatedFidelity = inputFidelity && validFidelities.includes(inputFidelity) ? inputFidelity : 'low'
+    
     const input: Record<string, unknown> = {
       prompt: prompt,
       aspect_ratio: aspectRatio || '1:1',
       number_of_images: numberOfImages || 1,
       quality: quality || 'auto',
       output_format: outputFormat || 'webp',
-      background: background || 'auto',
-      moderation: moderation || 'auto',
-      input_fidelity: inputFidelity || 'low',
+      background: validatedBackground,
+      moderation: validatedModeration,
+      input_fidelity: validatedFidelity,
       output_compression: outputCompression || 90,
     }
 
