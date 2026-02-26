@@ -106,11 +106,11 @@ export async function POST(req: NextRequest) {
         prompt: finalPrompt,
         aspect_ratio: outputSize || 'match_input_image',
         output_format: 'png',
-        resolution: '2K',
+        resolution: '1K',
         safety_filter_level: 'block_only_high',
       }
 
-      console.log(`🎨 Using resolution: 2K (${validImageUrls.length + 1} images total)`)
+      console.log(`🎨 Using resolution: 1K (${validImageUrls.length + 1} images total)`)
 
       // Retry logic for Replicate API (max 3 attempts)
       let prediction
@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
       prompt: prompt,
       aspect_ratio: outputSize || 'match_input_image',
       output_format: 'png',
-      resolution: '2K',
+      resolution: '1K',
       safety_filter_level: 'block_only_high', // 🔥 Same as Replicate web UI default
     }
 
