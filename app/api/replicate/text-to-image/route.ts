@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     const input = {
       prompt: prompt,
       aspect_ratio: outputSize || '1:1',
+      image_size: '2K',
     }
 
     // Retry logic for Replicate API (max 3 attempts)
