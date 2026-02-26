@@ -1,25 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
 
 export default function RegisterPage() {
-  const router = useRouter()
-  const supabase = createClient()
-  
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
-  async function handleRegister(e: React.FormEvent) {
+  async function handleCreateUser(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setSuccess('')
 
     if (password !== confirmPassword) {
       setError('รหัสผ่านไม่ตรงกัน')
@@ -34,30 +31,26 @@ export default function RegisterPage() {
     }
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name: name || email.split('@')[0],
-          },
-        },
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name: name || undefined }),
       })
 
-      if (signUpError) throw signUpError
+      const data = await res.json()
 
-      // Auto login after register
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+      if (!res.ok) {
+        throw new Error(data.error || 'เกิดข้อผิดพลาด')
+      }
 
-      if (signInError) throw signInError
-
-      router.push('/dashboard')
-      router.refresh()
+      setSuccess(data.message || `สร้างบัญชี ${email} สำเร็จ`)
+      // Reset form
+      setEmail('')
+      setPassword('')
+      setConfirmPassword('')
+      setName('')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสมัครสมาชิก')
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการสร้างบัญชี')
     } finally {
       setLoading(false)
     }
@@ -68,32 +61,38 @@ export default function RegisterPage() {
       <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl p-8">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-purple-600 mb-2">🏨 HotelPlus AI</h1>
-          <p className="text-gray-600">สมัครสมาชิกเพื่อเริ่มใช้งาน</p>
+          <p className="text-gray-600">🔐 สร้างบัญชีผู้ใช้ใหม่ (Admin Only)</p>
         </div>
 
-        <form onSubmit={handleRegister} className="space-y-6">
+        <form onSubmit={handleCreateUser} className="space-y-6">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
               ⚠️ {error}
             </div>
           )}
 
+          {success && (
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+              ✅ {success}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              👤 ชื่อ (ไม่บังคับ)
+              👤 ชื่อผู้ใช้ (ไม่บังคับ)
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900"
-              placeholder="ชื่อของคุณ"
+              placeholder="ชื่อผู้ใช้ใหม่"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              📧 Email
+              📧 Email ผู้ใช้ใหม่
             </label>
             <input
               type="email"
@@ -101,13 +100,13 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900"
-              placeholder="your@email.com"
+              placeholder="newuser@email.com"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              🔒 Password
+              🔒 Password ผู้ใช้ใหม่
             </label>
             <input
               type="password"
@@ -138,17 +137,14 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? '⏳ กำลังสมัครสมาชิก...' : '🚀 สมัครสมาชิก'}
+            {loading ? '⏳ กำลังสร้างบัญชี...' : '🛡️ สร้างบัญชีผู้ใช้ใหม่'}
           </button>
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-gray-600">
-            มีบัญชีอยู่แล้ว?{' '}
-            <Link href="/login" className="text-purple-600 font-semibold hover:underline">
-              เข้าสู่ระบบ
-            </Link>
-          </p>
+          <Link href="/dashboard" className="text-purple-600 font-semibold hover:underline">
+            ← กลับไปหน้า Dashboard
+          </Link>
         </div>
       </div>
     </div>

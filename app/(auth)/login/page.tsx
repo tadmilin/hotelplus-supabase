@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 export default function LoginPage() {
@@ -89,12 +88,11 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-6 text-center">
-          <p className="text-gray-600">
-            ยังไม่มีบัญชี?{' '}
-            <Link href="/register" className="text-purple-600 font-semibold hover:underline">
-              สมัครสมาชิก
-            </Link>
-          </p>
+          <div className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg">
+            <p className="text-sm">
+              🔒 ยังไม่มีบัญชี? กรุณาติดต่อ Admin เพื่อขอรหัสผ่าน
+            </p>
+          </div>
         </div>
       </div>
     </div>
