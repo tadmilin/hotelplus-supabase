@@ -10,6 +10,7 @@ export default function Navbar() {
   const router = useRouter()
   const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -17,6 +18,17 @@ export default function Navbar() {
     async function getUser() {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
+      
+      // Check if user is admin
+      if (user) {
+        const { data: adminRecord } = await supabase
+          .from('admin_users')
+          .select('user_id')
+          .eq('user_id', user.id)
+          .single()
+        setIsAdmin(!!adminRecord)
+      }
+      
       setLoading(false)
     }
     getUser()
@@ -111,6 +123,18 @@ export default function Navbar() {
                 >
                   💬 Gemini Edit
                 </Link>
+                {isAdmin && (
+                  <Link 
+                    href="/register"
+                    className={`px-4 py-2 rounded-lg transition-all ${
+                      pathname === '/register' 
+                        ? 'bg-yellow-400 text-gray-900 font-semibold' 
+                        : 'bg-yellow-600 hover:bg-yellow-500 text-white'
+                    }`}
+                  >
+                    🛡️ สร้างบัญชี
+                  </Link>
+                )}
               </div>
             )}
           </div>
